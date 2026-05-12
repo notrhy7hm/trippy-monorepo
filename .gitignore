@@ -1,0 +1,20 @@
+# Go
+backend/bin/
+backend/*.exe
+backend/coverage.out
+backend/.env
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Misc
+*.log

@@ -14,6 +14,7 @@ import (
 	"github.com/trippyai/trippy/backend/internal/auth"
 	"github.com/trippyai/trippy/backend/internal/config"
 	"github.com/trippyai/trippy/backend/internal/db"
+	"github.com/trippyai/trippy/backend/internal/friends"
 	"github.com/trippyai/trippy/backend/internal/httpx"
 	"github.com/trippyai/trippy/backend/internal/trips"
 	"github.com/trippyai/trippy/backend/internal/users"
@@ -40,15 +41,17 @@ func main() {
 	// Modules expose Service; handlers depend only on the local Service.
 	userSvc := users.NewService(users.NewRepo(pool))
 	authSvc := auth.NewService(userSvc, cfg.JWTSecret, cfg.JWTTTL)
+	friendsSvc := friends.NewService(friends.NewRepo(pool), userSvc)
 	tripSvc := trips.NewService(trips.NewRepo(pool))
 	agentSvc := agents.NewService() // M3 — stub, not wired into routes yet
 
 	_ = agentSvc
 
 	r := httpx.NewRouter(httpx.Deps{
-		Auth:  authSvc,
-		Users: userSvc,
-		Trips: tripSvc,
+		Auth:    authSvc,
+		Users:   userSvc,
+		Friends: friendsSvc,
+		Trips:   tripSvc,
 	})
 
 	srv := &http.Server{

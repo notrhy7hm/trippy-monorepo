@@ -28,3 +28,12 @@ type UpdateInput struct {
 	Bio         *string
 	AvatarURL   *string
 }
+
+// PublicUser is the minimal, privacy-safe shape returned by user-search.
+// Email is intentionally omitted to prevent enumeration via search.
+type PublicUser struct {
+	ID          uuid.UUID `db:"id"           json:"-"`
+	Username    string    `db:"username"     json:"username"`
+	DisplayName string    `db:"display_name" json:"displayName"`
+	AvatarURL   string    `db:"avatar_url"   json:"avatarUrl,omitempty"`
+}

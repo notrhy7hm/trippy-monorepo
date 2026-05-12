@@ -10,14 +10,16 @@ import (
 
 	"github.com/trippyai/trippy/backend/internal/api"
 	"github.com/trippyai/trippy/backend/internal/auth"
+	"github.com/trippyai/trippy/backend/internal/friends"
 	"github.com/trippyai/trippy/backend/internal/trips"
 	"github.com/trippyai/trippy/backend/internal/users"
 )
 
 type Deps struct {
-	Auth  *auth.Service
-	Users *users.Service
-	Trips *trips.Service
+	Auth    *auth.Service
+	Users   *users.Service
+	Friends *friends.Service
+	Trips   *trips.Service
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -53,6 +55,19 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/auth/me", usersH.Me)
 			r.Get("/users/me", usersH.Me)
 			r.Patch("/users/me", usersH.UpdateMe)
+
+			// friends module also owns /users/search because the response
+			// is enriched with the viewer's relation to each result.
+			friendsH := friends.NewHandler(d.Friends)
+			r.Get("/users/search", friendsH.Search)
+			r.Get("/friends", friendsH.List)
+			r.Delete("/friends/{username}", friendsH.Remove)
+			r.Get("/friend-requests/incoming", friendsH.ListIncoming)
+			r.Get("/friend-requests/outgoing", friendsH.ListOutgoing)
+			r.Post("/friend-requests", friendsH.Send)
+			r.Post("/friend-requests/from/{username}/accept", friendsH.Accept)
+			r.Post("/friend-requests/from/{username}/decline", friendsH.Decline)
+			r.Delete("/friend-requests/to/{username}", friendsH.Cancel)
 
 			tripsH := trips.NewHandler(d.Trips)
 			r.Post("/trips", tripsH.Create)

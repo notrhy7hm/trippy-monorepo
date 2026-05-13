@@ -74,6 +74,10 @@ export function TripDashboard() {
   const [sending, setSending] = useState(false);
   const [busyToken, setBusyToken] = useState<string | null>(null);
 
+  const [expandedMember, setExpandedMember] = useState<string | null>(null);
+  const [busyMember, setBusyMember] = useState<string | null>(null);
+  const [memberError, setMemberError] = useState<string | null>(null);
+
   // genRef ticks on every tripSlug change so resolves from in-flight
   // requests for the old slug can be dropped instead of overwriting state.
   const genRef = useRef(0);
@@ -117,6 +121,9 @@ export function TripDashboard() {
     setPickedRole("member");
     setSending(false);
     setBusyToken(null);
+    setExpandedMember(null);
+    setBusyMember(null);
+    setMemberError(null);
 
     loadTripAndMembers(gen);
   }, [tripSlug, loadTripAndMembers]);
@@ -220,6 +227,40 @@ export function TripDashboard() {
     }
   }
 
+  async function onChangeRole(username: string, newRole: Role) {
+    if (!tripSlug) return;
+    setBusyMember(username);
+    setMemberError(null);
+    try {
+      const updated = await api<Member>(
+        "PATCH",
+        `/trips/${tripSlug}/members/${username}/role`,
+        { role: newRole },
+      );
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.username === username ? { ...m, ...updated } : m,
+        ),
+      );
+      setExpandedMember(null);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        setMemberError(
+          "You do not have permission to manage roles in this trip.",
+        );
+        // Re-derive permissions from the backend in case our role drifted.
+        await reloadTrip();
+        setExpandedMember(null);
+      } else {
+        setMemberError(
+          err instanceof ApiError ? err.message : "Role change failed",
+        );
+      }
+    } finally {
+      setBusyMember(null);
+    }
+  }
+
   if (error) {
     return (
       <Card className="p-8 text-center">
@@ -254,7 +295,16 @@ export function TripDashboard() {
 
       {canInvite ? (
         <div className="mt-10 grid gap-6 md:grid-cols-3">
-          <MembersCard className="md:col-span-2 p-6" members={members} />
+          <MembersCard
+            className="md:col-span-2 p-6"
+            members={members}
+            viewerIsOwner={myMember?.role === "owner"}
+            expandedMember={expandedMember}
+            setExpandedMember={setExpandedMember}
+            busyMember={busyMember}
+            memberError={memberError}
+            onChangeRole={onChangeRole}
+          />
           <Card className="p-6">
             <h2 className="text-lg font-medium">Invite friends</h2>
             <p className="mt-2 text-sm text-ink-500">
@@ -338,7 +388,16 @@ export function TripDashboard() {
         </div>
       ) : (
         <div className="mt-10">
-          <MembersCard className="p-6" members={members} />
+          <MembersCard
+            className="p-6"
+            members={members}
+            viewerIsOwner={myMember?.role === "owner"}
+            expandedMember={expandedMember}
+            setExpandedMember={setExpandedMember}
+            busyMember={busyMember}
+            memberError={memberError}
+            onChangeRole={onChangeRole}
+          />
         </div>
       )}
     </div>
@@ -486,28 +545,99 @@ function RolePills({
 function MembersCard({
   className,
   members,
+  viewerIsOwner,
+  expandedMember,
+  setExpandedMember,
+  busyMember,
+  memberError,
+  onChangeRole,
 }: {
   className: string;
   members: Member[];
+  viewerIsOwner: boolean;
+  expandedMember: string | null;
+  setExpandedMember: (u: string | null) => void;
+  busyMember: string | null;
+  memberError: string | null;
+  onChangeRole: (username: string, role: Role) => void;
 }) {
   return (
     <Card className={className}>
       <h2 className="text-lg font-medium">Members</h2>
+      {memberError && (
+        <p className="mt-2 text-sm text-red-600">{memberError}</p>
+      )}
       <ul className="mt-4 divide-y divide-ink-100">
-        {members.map((m) => (
-          <li
-            key={m.username}
-            className="flex items-center justify-between py-3"
-          >
-            <div>
-              <p className="text-sm font-medium">{m.displayName}</p>
-              <p className="text-xs text-ink-500">@{m.username}</p>
-            </div>
-            <span className="rounded border border-ink-200 px-2 py-0.5 text-xs uppercase tracking-wider text-ink-500">
-              {prettyRole(m.role)}
-            </span>
-          </li>
-        ))}
+        {members.map((m) => {
+          const canEditRow = viewerIsOwner && m.role !== "owner";
+          const isExpanded =
+            canEditRow && expandedMember === m.username;
+          const isBusy = busyMember === m.username;
+          return (
+            <li
+              key={m.username}
+              className="flex flex-wrap items-center justify-between gap-3 py-3"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{m.displayName}</p>
+                <p className="text-xs text-ink-500">@{m.username}</p>
+              </div>
+              {isExpanded ? (
+                <div
+                  role="radiogroup"
+                  aria-label={`Change role for @${m.username}`}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  {INVITEABLE_ROLES.map((r) => {
+                    const selected = m.role === r;
+                    return (
+                      <button
+                        key={r}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => onChangeRole(m.username, r)}
+                        disabled={isBusy || selected}
+                        className={[
+                          "rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors",
+                          selected
+                            ? "border-ink-950 bg-ink-950 text-white"
+                            : "border-ink-200 bg-white text-ink-600 hover:border-ink-400",
+                          "disabled:cursor-default disabled:opacity-60",
+                        ].join(" ")}
+                      >
+                        {prettyRole(r)}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setExpandedMember(null)}
+                    disabled={isBusy}
+                    className="px-2 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="rounded border border-ink-200 px-2 py-0.5 text-xs uppercase tracking-wider text-ink-500">
+                    {prettyRole(m.role)}
+                  </span>
+                  {canEditRow && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedMember(m.username)}
+                      className="text-xs text-ink-500 hover:text-ink-950"
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </Card>
   );

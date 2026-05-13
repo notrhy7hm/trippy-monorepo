@@ -23,6 +23,7 @@ var (
 	ErrInviteNotYours          = errors.New("invite was not addressed to you")
 	ErrInviteBadIdentifier     = errors.New("invitee identifier is required")
 	ErrEmailInvitesUnsupported = errors.New("email invites for unregistered users are not supported in M1")
+	ErrCannotChangeOwnerRole   = errors.New("owner role cannot be changed")
 )
 
 // FriendsChecker is the minimum surface trips needs from the friends module
@@ -114,6 +115,55 @@ func (s *Service) ListMembers(ctx context.Context, slug string, userID uuid.UUID
 		return nil, err
 	}
 	return s.repo.ListMembers(ctx, t.ID)
+}
+
+// ---------------------------------------------------------------------------
+// member roles
+// ---------------------------------------------------------------------------
+
+// UpdateMemberRole changes the role of an existing trip member. Only the
+// trip owner may call this. The owner cannot be re-roled and 'owner' may
+// not be assigned to anyone — M1 keeps exactly one owner per trip.
+func (s *Service) UpdateMemberRole(ctx context.Context, callerID uuid.UUID, slug, targetUsername string, newRole Role) (Member, error) {
+	trip, err := s.repo.BySlug(ctx, slug)
+	if err != nil {
+		return Member{}, err
+	}
+
+	callerRole, ok, err := s.repo.IsMember(ctx, trip.ID, callerID)
+	if err != nil {
+		return Member{}, err
+	}
+	if !ok || callerRole != RoleOwner {
+		return Member{}, ErrForbidden
+	}
+
+	// isAssignableRole excludes 'owner', so requesting owner falls here.
+	if !isAssignableRole(newRole) {
+		return Member{}, ErrInvalidRole
+	}
+
+	target, err := s.users.ByUsername(ctx, strings.ToLower(strings.TrimSpace(targetUsername)))
+	if err != nil {
+		if errors.Is(err, users.ErrNotFound) {
+			return Member{}, ErrMemberNotFound
+		}
+		return Member{}, err
+	}
+
+	targetRole, isMember, err := s.repo.IsMember(ctx, trip.ID, target.ID)
+	if err != nil {
+		return Member{}, err
+	}
+	if !isMember {
+		return Member{}, ErrMemberNotFound
+	}
+	if targetRole == RoleOwner {
+		// Covers both the "demote self" and "re-role owner" cases.
+		return Member{}, ErrCannotChangeOwnerRole
+	}
+
+	return s.repo.UpdateMemberRole(ctx, trip.ID, target.ID, newRole)
 }
 
 // ---------------------------------------------------------------------------

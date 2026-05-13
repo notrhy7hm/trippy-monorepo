@@ -13,11 +13,12 @@ import (
 )
 
 var (
-	ErrNotFound        = errors.New("trip not found")
-	ErrSlugCollision   = errors.New("slug already exists")
-	ErrInviteExists    = errors.New("a pending invite already exists")
-	ErrInviteNotFound  = errors.New("trip invite not found")
+	ErrNotFound         = errors.New("trip not found")
+	ErrSlugCollision    = errors.New("slug already exists")
+	ErrInviteExists     = errors.New("a pending invite already exists")
+	ErrInviteNotFound   = errors.New("trip invite not found")
 	ErrInviteNotPending = errors.New("trip invite is no longer pending")
+	ErrMemberNotFound   = errors.New("trip member not found")
 )
 
 type Repo struct{ db *sqlx.DB }
@@ -373,6 +374,38 @@ func (r *Repo) AcceptInvite(ctx context.Context, token string, userID uuid.UUID)
 		return Trip{}, err
 	}
 	return trip, nil
+}
+
+// UpdateMemberRole flips the role of an existing trip_members row and
+// returns the updated Member shape (joined with users + user_profiles so
+// the caller gets the public-facing fields, not just UUIDs). Returns
+// ErrMemberNotFound when no row matches (trip × user).
+func (r *Repo) UpdateMemberRole(ctx context.Context, tripID, userID uuid.UUID, role Role) (Member, error) {
+	var m Member
+	var tags pq.StringArray
+	err := r.db.QueryRowxContext(ctx, `
+		WITH upd AS (
+			UPDATE trip_members SET role = $3
+			WHERE trip_id = $1 AND user_id = $2
+			RETURNING user_id, role, tags
+		)
+		SELECT upd.user_id,
+		       u.username,
+		       COALESCE(p.display_name, u.username) AS display_name,
+		       upd.role,
+		       upd.tags
+		FROM upd
+		JOIN users u ON u.id = upd.user_id
+		LEFT JOIN user_profiles p ON p.user_id = u.id
+	`, tripID, userID, role).Scan(&m.UserID, &m.Username, &m.DisplayName, &m.Role, &tags)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Member{}, ErrMemberNotFound
+	}
+	if err != nil {
+		return Member{}, err
+	}
+	m.Tags = []string(tags)
+	return m, nil
 }
 
 func (r *Repo) ListMembers(ctx context.Context, tripID uuid.UUID) ([]Member, error) {

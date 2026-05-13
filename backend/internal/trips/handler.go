@@ -119,6 +119,30 @@ func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// member role
+// ---------------------------------------------------------------------------
+
+type updateMemberRoleReq struct {
+	Role Role `json:"role"`
+}
+
+func (h *Handler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
+	var in updateMemberRoleReq
+	if err := api.DecodeJSON(r, &in); err != nil {
+		api.Err(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	slug := chi.URLParam(r, "tripSlug")
+	username := chi.URLParam(r, "username")
+	m, err := h.svc.UpdateMemberRole(r.Context(), api.UserID(r.Context()), slug, username, in.Role)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	api.JSON(w, http.StatusOK, m)
+}
+
+// ---------------------------------------------------------------------------
 // invites
 // ---------------------------------------------------------------------------
 
@@ -230,6 +254,11 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrEmailInvitesUnsupported):
 		api.Err(w, http.StatusUnprocessableEntity, "email_invites_not_supported",
 			"inviting unregistered users by email is not supported")
+	case errors.Is(err, ErrMemberNotFound):
+		api.Err(w, http.StatusNotFound, "member_not_found", "trip member not found")
+	case errors.Is(err, ErrCannotChangeOwnerRole):
+		api.Err(w, http.StatusBadRequest, "cannot_change_owner",
+			"the owner role cannot be changed")
 	case errors.Is(err, ErrInviteExists):
 		api.Err(w, http.StatusConflict, "invite_exists", "a pending invite already exists")
 	case errors.Is(err, ErrInviteNotFound):

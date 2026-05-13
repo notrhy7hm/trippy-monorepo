@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { KeyboardEvent } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -21,6 +28,10 @@ const INVITEABLE_ROLES: Exclude<Role, "owner">[] = [
   "budget_manager",
   "viewer",
 ];
+
+const MAX_TAGS = 8;
+const MAX_TAG_LEN = 24;
+const TAG_PATTERN = /^[a-z0-9_-]+$/;
 
 type Trip = {
   slug: string;
@@ -56,6 +67,23 @@ type Invite = {
   createdAt: string;
 };
 
+type RoleEditingProps = {
+  expandedMember: string | null;
+  onOpen: (username: string) => void;
+  onChange: (username: string, role: Role) => void;
+};
+
+type TagsEditingProps = {
+  editingMember: string | null;
+  draft: string[];
+  input: string;
+  setInput: (v: string) => void;
+  onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
+  onRemove: (t: string) => void;
+  onSave: (username: string) => void;
+  onOpen: (username: string, current: string[]) => void;
+};
+
 export function TripDashboard() {
   const { tripSlug } = useParams<{ tripSlug: string }>();
   const { user } = useAuth();
@@ -74,12 +102,19 @@ export function TripDashboard() {
   const [sending, setSending] = useState(false);
   const [busyToken, setBusyToken] = useState<string | null>(null);
 
+  // One editor open across the whole Members card at a time. Switching
+  // editors is centralized in openRoleEditor / openTagsEditor /
+  // closeEditors so role and tags can never both be open on the same row.
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
+  const [tagsEditingMember, setTagsEditingMember] = useState<string | null>(
+    null,
+  );
+  const [tagDraft, setTagDraft] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
+
   const [busyMember, setBusyMember] = useState<string | null>(null);
   const [memberError, setMemberError] = useState<string | null>(null);
 
-  // genRef ticks on every tripSlug change so resolves from in-flight
-  // requests for the old slug can be dropped instead of overwriting state.
   const genRef = useRef(0);
 
   const loadTripAndMembers = useCallback(
@@ -107,7 +142,6 @@ export function TripDashboard() {
     [loadTripAndMembers],
   );
 
-  // Reset every route-specific piece of state, then load the new trip.
   useEffect(() => {
     const gen = ++genRef.current;
     setError(null);
@@ -122,6 +156,9 @@ export function TripDashboard() {
     setSending(false);
     setBusyToken(null);
     setExpandedMember(null);
+    setTagsEditingMember(null);
+    setTagDraft([]);
+    setTagInput("");
     setBusyMember(null);
     setMemberError(null);
 
@@ -227,12 +264,69 @@ export function TripDashboard() {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // role + tag editor wiring
+  // ---------------------------------------------------------------------
+
+  function openRoleEditor(username: string) {
+    setMemberError(null);
+    setTagsEditingMember(null);
+    setTagDraft([]);
+    setTagInput("");
+    setExpandedMember(username);
+  }
+
+  function openTagsEditor(username: string, current: string[]) {
+    setMemberError(null);
+    setExpandedMember(null);
+    setTagsEditingMember(username);
+    setTagDraft(current);
+    setTagInput("");
+  }
+
+  function closeEditors() {
+    setExpandedMember(null);
+    setTagsEditingMember(null);
+    setTagDraft([]);
+    setTagInput("");
+    setMemberError(null);
+  }
+
+  function onRemoveTag(t: string) {
+    setTagDraft((prev) => prev.filter((x) => x !== t));
+  }
+
+  function commitTagFromInput() {
+    if (tagInput.trim() === "") {
+      setTagInput("");
+      return;
+    }
+    const result = appendTag(tagDraft, tagInput);
+    if (result.error) {
+      setMemberError(result.error);
+      return;
+    }
+    setTagDraft(result.tags);
+    setTagInput("");
+    setMemberError(null);
+  }
+
+  function onTagInputKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      commitTagFromInput();
+    } else if (
+      e.key === "Backspace" &&
+      tagInput === "" &&
+      tagDraft.length > 0
+    ) {
+      e.preventDefault();
+      setTagDraft((prev) => prev.slice(0, -1));
+    }
+  }
+
   async function onChangeRole(username: string, newRole: Role) {
-    // Block concurrent edits on any row while one PATCH is in flight.
     if (!tripSlug || busyMember !== null) return;
-    // Pin to the current route generation; if the user navigates to a
-    // different trip while the PATCH is in flight, drop the response so
-    // we cannot patch the new trip's members.
     const gen = genRef.current;
     setBusyMember(username);
     setMemberError(null);
@@ -260,9 +354,6 @@ export function TripDashboard() {
           err instanceof ApiError ? err.message : "Role change failed",
         );
       }
-      // 400 / 403 / 404 almost always mean our local members view is
-      // stale (target was removed, promoted/demoted, or our role
-      // drifted) — refresh so the panel re-syncs with the backend.
       if (
         err instanceof ApiError &&
         (err.status === 400 || err.status === 403 || err.status === 404)
@@ -272,9 +363,66 @@ export function TripDashboard() {
       }
       setExpandedMember(null);
     } finally {
-      // If the gen no longer matches we have already navigated; the
-      // tripSlug-change effect cleared busyMember as part of its reset,
-      // so leave its state alone.
+      if (gen === genRef.current) {
+        setBusyMember(null);
+      }
+    }
+  }
+
+  async function onSaveTags(username: string) {
+    if (!tripSlug || busyMember !== null) return;
+    setMemberError(null);
+
+    // Auto-commit any trailing input the user typed but didn't Enter.
+    let finalTags = tagDraft;
+    if (tagInput.trim() !== "") {
+      const result = appendTag(tagDraft, tagInput);
+      if (result.error) {
+        setMemberError(result.error);
+        return;
+      }
+      finalTags = result.tags;
+    }
+
+    const gen = genRef.current;
+    setBusyMember(username);
+    try {
+      const updated = await api<Member>(
+        "PATCH",
+        `/trips/${tripSlug}/members/${encodeURIComponent(username)}/tags`,
+        { tags: finalTags },
+      );
+      if (gen !== genRef.current) return;
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.username === username ? { ...m, ...updated } : m,
+        ),
+      );
+      closeEditors();
+    } catch (err) {
+      if (gen !== genRef.current) return;
+      if (err instanceof ApiError && err.status === 403) {
+        setMemberError(
+          "You do not have permission to manage tags in this trip.",
+        );
+      } else {
+        setMemberError(
+          err instanceof ApiError ? err.message : "Save failed",
+        );
+      }
+      // 403 / 404 typically mean stale state (permissions drifted, member
+      // removed) — refresh and close the editor. 400 means the backend
+      // disagreed with the payload; keep the editor open so the user can
+      // fix it.
+      if (
+        err instanceof ApiError &&
+        (err.status === 403 || err.status === 404)
+      ) {
+        await reloadTrip();
+        if (gen !== genRef.current) return;
+        closeEditors();
+      }
+    } finally {
       if (gen === genRef.current) {
         setBusyMember(null);
       }
@@ -291,6 +439,22 @@ export function TripDashboard() {
   if (!trip) {
     return <p className="text-sm text-ink-500">Loading…</p>;
   }
+
+  const roleEditor: RoleEditingProps = {
+    expandedMember,
+    onOpen: openRoleEditor,
+    onChange: onChangeRole,
+  };
+  const tagsEditor: TagsEditingProps = {
+    editingMember: tagsEditingMember,
+    draft: tagDraft,
+    input: tagInput,
+    setInput: setTagInput,
+    onKeyDown: onTagInputKeyDown,
+    onRemove: onRemoveTag,
+    onSave: onSaveTags,
+    onOpen: openTagsEditor,
+  };
 
   return (
     <div>
@@ -319,11 +483,11 @@ export function TripDashboard() {
             className="md:col-span-2 p-6"
             members={members}
             viewerIsOwner={myMember?.role === "owner"}
-            expandedMember={expandedMember}
-            setExpandedMember={setExpandedMember}
             busyMember={busyMember}
             memberError={memberError}
-            onChangeRole={onChangeRole}
+            onCancelEdit={closeEditors}
+            role={roleEditor}
+            tags={tagsEditor}
           />
           <Card className="p-6">
             <h2 className="text-lg font-medium">Invite friends</h2>
@@ -412,11 +576,11 @@ export function TripDashboard() {
             className="p-6"
             members={members}
             viewerIsOwner={myMember?.role === "owner"}
-            expandedMember={expandedMember}
-            setExpandedMember={setExpandedMember}
             busyMember={busyMember}
             memberError={memberError}
-            onChangeRole={onChangeRole}
+            onCancelEdit={closeEditors}
+            role={roleEditor}
+            tags={tagsEditor}
           />
         </div>
       )}
@@ -566,21 +730,24 @@ function MembersCard({
   className,
   members,
   viewerIsOwner,
-  expandedMember,
-  setExpandedMember,
   busyMember,
   memberError,
-  onChangeRole,
+  onCancelEdit,
+  role,
+  tags,
 }: {
   className: string;
   members: Member[];
   viewerIsOwner: boolean;
-  expandedMember: string | null;
-  setExpandedMember: (u: string | null) => void;
   busyMember: string | null;
   memberError: string | null;
-  onChangeRole: (username: string, role: Role) => void;
+  onCancelEdit: () => void;
+  role: RoleEditingProps;
+  tags: TagsEditingProps;
 }) {
+  // Disable every editor control while any role or tag PATCH is in flight.
+  const locked = busyMember !== null;
+
   return (
     <Card className={className}>
       <h2 className="text-lg font-medium">Members</h2>
@@ -589,81 +756,202 @@ function MembersCard({
       )}
       <ul className="mt-4 divide-y divide-ink-100">
         {members.map((m) => {
-          const canEditRow = viewerIsOwner && m.role !== "owner";
-          const isExpanded =
-            canEditRow && expandedMember === m.username;
-          // Disable every role control on every row while any update
-          // is in flight, so a click on another row cannot race the
-          // pending PATCH.
-          const locked = busyMember !== null;
+          const canEditRole = viewerIsOwner && m.role !== "owner";
+          const canEditTags = viewerIsOwner; // tags are editable for everyone, including the owner
+          const isRoleExpanded =
+            canEditRole && role.expandedMember === m.username;
+          const isTagsExpanded =
+            canEditTags && tags.editingMember === m.username;
+
           return (
-            <li
-              key={m.username}
-              className="flex flex-wrap items-center justify-between gap-3 py-3"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{m.displayName}</p>
-                <p className="text-xs text-ink-500">@{m.username}</p>
-              </div>
-              {isExpanded ? (
-                <div
-                  role="radiogroup"
-                  aria-label={`Change role for @${m.username}`}
-                  className="flex flex-wrap items-center gap-2"
-                >
-                  {INVITEABLE_ROLES.map((r) => {
-                    const selected = m.role === r;
-                    return (
-                      <button
-                        key={r}
-                        type="button"
-                        role="radio"
-                        aria-checked={selected}
-                        onClick={() => onChangeRole(m.username, r)}
-                        disabled={locked || selected}
-                        className={[
-                          "rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors",
-                          selected
-                            ? "border-ink-950 bg-ink-950 text-white"
-                            : "border-ink-200 bg-white text-ink-600 hover:border-ink-400",
-                          "disabled:cursor-default disabled:opacity-60",
-                        ].join(" ")}
-                      >
-                        {prettyRole(r)}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    onClick={() => setExpandedMember(null)}
-                    disabled={locked}
-                    className="px-2 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-60"
-                  >
-                    Cancel
-                  </button>
+            <li key={m.username} className="space-y-2 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{m.displayName}</p>
+                  <p className="text-xs text-ink-500">@{m.username}</p>
                 </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="rounded border border-ink-200 px-2 py-0.5 text-xs uppercase tracking-wider text-ink-500">
-                    {prettyRole(m.role)}
-                  </span>
-                  {canEditRow && (
+                {isRoleExpanded ? (
+                  <div
+                    role="radiogroup"
+                    aria-label={`Change role for @${m.username}`}
+                    className="flex flex-wrap items-center gap-2"
+                  >
+                    {INVITEABLE_ROLES.map((r) => {
+                      const selected = m.role === r;
+                      return (
+                        <button
+                          key={r}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          onClick={() => role.onChange(m.username, r)}
+                          disabled={locked || selected}
+                          className={[
+                            "rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors",
+                            selected
+                              ? "border-ink-950 bg-ink-950 text-white"
+                              : "border-ink-200 bg-white text-ink-600 hover:border-ink-400",
+                            "disabled:cursor-default disabled:opacity-60",
+                          ].join(" ")}
+                        >
+                          {prettyRole(r)}
+                        </button>
+                      );
+                    })}
                     <button
                       type="button"
-                      onClick={() => setExpandedMember(m.username)}
+                      onClick={onCancelEdit}
                       disabled={locked}
-                      className="text-xs text-ink-500 hover:text-ink-950 disabled:cursor-default disabled:opacity-50 disabled:hover:text-ink-500"
+                      className="px-2 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-60"
                     >
-                      Change
+                      Cancel
                     </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="rounded border border-ink-200 px-2 py-0.5 text-xs uppercase tracking-wider text-ink-500">
+                      {prettyRole(m.role)}
+                    </span>
+                    {canEditRole && (
+                      <button
+                        type="button"
+                        onClick={() => role.onOpen(m.username)}
+                        disabled={locked}
+                        className="text-xs text-ink-500 hover:text-ink-950 disabled:cursor-default disabled:opacity-50 disabled:hover:text-ink-500"
+                      >
+                        Change
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {isTagsExpanded ? (
+                <TagEditor
+                  username={m.username}
+                  draft={tags.draft}
+                  input={tags.input}
+                  setInput={tags.setInput}
+                  onKeyDown={tags.onKeyDown}
+                  onRemove={tags.onRemove}
+                  onSave={tags.onSave}
+                  onCancel={onCancelEdit}
+                  locked={locked}
+                />
+              ) : canEditTags ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {m.tags.length === 0 ? (
+                    <span className="text-xs italic text-ink-400">
+                      No tags
+                    </span>
+                  ) : (
+                    m.tags.map((t) => <TagChip key={t} text={t} />)
                   )}
+                  <button
+                    type="button"
+                    onClick={() => tags.onOpen(m.username, m.tags)}
+                    disabled={locked}
+                    className="text-xs text-ink-500 hover:text-ink-950 disabled:cursor-default disabled:opacity-50 disabled:hover:text-ink-500"
+                  >
+                    Edit tags
+                  </button>
                 </div>
-              )}
+              ) : m.tags.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {m.tags.map((t) => (
+                    <TagChip key={t} text={t} />
+                  ))}
+                </div>
+              ) : null}
             </li>
           );
         })}
       </ul>
     </Card>
+  );
+}
+
+function TagChip({ text }: { text: string }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-ink-200 bg-white px-2 py-0.5 text-xs text-ink-600">
+      {text}
+    </span>
+  );
+}
+
+function TagEditor({
+  username,
+  draft,
+  input,
+  setInput,
+  onKeyDown,
+  onRemove,
+  onSave,
+  onCancel,
+  locked,
+}: {
+  username: string;
+  draft: string[];
+  input: string;
+  setInput: (v: string) => void;
+  onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
+  onRemove: (t: string) => void;
+  onSave: (username: string) => void;
+  onCancel: () => void;
+  locked: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {draft.length === 0 ? (
+          <span className="text-xs italic text-ink-400">No tags yet.</span>
+        ) : (
+          draft.map((t) => (
+            <span
+              key={t}
+              className="inline-flex items-center gap-1 rounded-full border border-ink-200 bg-white px-2 py-0.5 text-xs text-ink-700"
+            >
+              {t}
+              <button
+                type="button"
+                onClick={() => onRemove(t)}
+                disabled={locked}
+                aria-label={`Remove tag ${t}`}
+                className="ml-0.5 rounded-full text-ink-400 hover:text-ink-950 disabled:opacity-50"
+              >
+                ×
+              </button>
+            </span>
+          ))
+        )}
+      </div>
+      <Input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder="Add tag — press Enter"
+        disabled={locked}
+        maxLength={MAX_TAG_LEN}
+        autoComplete="off"
+      />
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          onClick={() => onSave(username)}
+          disabled={locked}
+        >
+          {locked ? "Saving…" : "Save"}
+        </Button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={locked}
+          className="text-xs text-ink-500 hover:text-ink-950 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -680,4 +968,37 @@ function PlannerCard({ title, hint }: { title: string; hint: string }) {
 function prettyRole(r: string) {
   if (r === "budget_manager") return "Budget manager";
   return r.charAt(0).toUpperCase() + r.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// tag helpers — mirror backend normalization for UX, backend is still source
+// of truth.
+// ---------------------------------------------------------------------------
+
+function normalizeTag(raw: string): string {
+  // trim, lowercase, collapse internal whitespace into a single dash.
+  const tokens = raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return tokens.join("-");
+}
+
+function appendTag(
+  tags: string[],
+  raw: string,
+): { tags: string[]; error?: string } {
+  const norm = normalizeTag(raw);
+  if (norm === "") return { tags };
+  if (norm.length > MAX_TAG_LEN) {
+    return { tags, error: `Tag is too long (max ${MAX_TAG_LEN}).` };
+  }
+  if (!TAG_PATTERN.test(norm)) {
+    return {
+      tags,
+      error: "Tags can only use lowercase letters, digits, dashes, or underscores.",
+    };
+  }
+  if (tags.includes(norm)) return { tags }; // silent dedupe
+  if (tags.length >= MAX_TAGS) {
+    return { tags, error: `A member can have at most ${MAX_TAGS} tags.` };
+  }
+  return { tags: [...tags, norm] };
 }

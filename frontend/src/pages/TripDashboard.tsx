@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { Input } from "../components/ui/Input";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -66,25 +67,59 @@ export function TripDashboard() {
   const [friends, setFriends] = useState<Friend[] | null>(null);
   const [invites, setInvites] = useState<Invite[] | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
+
   const [pickedFriend, setPickedFriend] = useState("");
+  const [friendQuery, setFriendQuery] = useState("");
   const [pickedRole, setPickedRole] = useState<Role>("member");
   const [sending, setSending] = useState(false);
   const [busyToken, setBusyToken] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!tripSlug) return;
-    Promise.all([
-      api<Trip>("GET", `/trips/${tripSlug}`),
-      api<Member[]>("GET", `/trips/${tripSlug}/members`),
-    ])
-      .then(([t, m]) => {
+  // genRef ticks on every tripSlug change so resolves from in-flight
+  // requests for the old slug can be dropped instead of overwriting state.
+  const genRef = useRef(0);
+
+  const loadTripAndMembers = useCallback(
+    async (gen: number) => {
+      if (!tripSlug) return;
+      try {
+        const [t, m] = await Promise.all([
+          api<Trip>("GET", `/trips/${tripSlug}`),
+          api<Member[]>("GET", `/trips/${tripSlug}/members`),
+        ]);
+        if (gen !== genRef.current) return;
         setTrip(t);
         setMembers(m);
-      })
-      .catch((err) =>
-        setError(err instanceof ApiError ? err.message : "Failed to load"),
-      );
-  }, [tripSlug]);
+        setError(null);
+      } catch (err) {
+        if (gen !== genRef.current) return;
+        setError(err instanceof ApiError ? err.message : "Failed to load");
+      }
+    },
+    [tripSlug],
+  );
+
+  const reloadTrip = useCallback(
+    () => loadTripAndMembers(genRef.current),
+    [loadTripAndMembers],
+  );
+
+  // Reset every route-specific piece of state, then load the new trip.
+  useEffect(() => {
+    const gen = ++genRef.current;
+    setError(null);
+    setTrip(null);
+    setMembers([]);
+    setFriends(null);
+    setInvites(null);
+    setInviteError(null);
+    setPickedFriend("");
+    setFriendQuery("");
+    setPickedRole("member");
+    setSending(false);
+    setBusyToken(null);
+
+    loadTripAndMembers(gen);
+  }, [tripSlug, loadTripAndMembers]);
 
   const myMember = members.find((m) => m.username === user?.username);
   const canInvite =
@@ -92,14 +127,17 @@ export function TripDashboard() {
 
   const refreshInviteCtx = useCallback(async () => {
     if (!tripSlug) return;
+    const gen = genRef.current;
     try {
       const [f, i] = await Promise.all([
         api<Friend[]>("GET", "/friends"),
         api<Invite[]>("GET", `/trips/${tripSlug}/invites`),
       ]);
+      if (gen !== genRef.current) return;
       setFriends(f);
       setInvites(i);
     } catch (err) {
+      if (gen !== genRef.current) return;
       setInviteError(
         err instanceof ApiError ? err.message : "Failed to load invites",
       );
@@ -112,6 +150,27 @@ export function TripDashboard() {
     if (canInvite) refreshInviteCtx();
   }, [canInvite, refreshInviteCtx]);
 
+  const memberSet = useMemo(
+    () => new Set(members.map((m) => m.username)),
+    [members],
+  );
+  const pendingSet = useMemo(
+    () =>
+      new Set(
+        invites
+          ?.map((i) => i.invitee?.username)
+          .filter((u): u is string => !!u) ?? [],
+      ),
+    [invites],
+  );
+  const inviteable = useMemo(
+    () =>
+      friends?.filter(
+        (f) => !memberSet.has(f.username) && !pendingSet.has(f.username),
+      ) ?? [],
+    [friends, memberSet, pendingSet],
+  );
+
   async function onSend(e: React.FormEvent) {
     e.preventDefault();
     if (!pickedFriend || !tripSlug) return;
@@ -123,12 +182,18 @@ export function TripDashboard() {
         role: pickedRole,
       });
       setPickedFriend("");
+      setFriendQuery("");
       setPickedRole("member");
       await refreshInviteCtx();
     } catch (err) {
-      setInviteError(
-        err instanceof ApiError ? err.message : "Send failed",
-      );
+      if (err instanceof ApiError && err.status === 403) {
+        setInviteError(
+          "You don't have permission to invite people to this trip anymore.",
+        );
+        await reloadTrip();
+      } else {
+        setInviteError(err instanceof ApiError ? err.message : "Send failed");
+      }
     } finally {
       setSending(false);
     }
@@ -142,9 +207,14 @@ export function TripDashboard() {
       await api("DELETE", `/trips/${tripSlug}/invites/${token}`);
       await refreshInviteCtx();
     } catch (err) {
-      setInviteError(
-        err instanceof ApiError ? err.message : "Revoke failed",
-      );
+      if (err instanceof ApiError && err.status === 403) {
+        setInviteError(
+          "You don't have permission to revoke invites in this trip anymore.",
+        );
+        await reloadTrip();
+      } else {
+        setInviteError(err instanceof ApiError ? err.message : "Revoke failed");
+      }
     } finally {
       setBusyToken(null);
     }
@@ -160,17 +230,6 @@ export function TripDashboard() {
   if (!trip) {
     return <p className="text-sm text-ink-500">Loading…</p>;
   }
-
-  const memberSet = new Set(members.map((m) => m.username));
-  const pendingSet = new Set(
-    invites
-      ?.map((i) => i.invitee?.username)
-      .filter((u): u is string => !!u) ?? [],
-  );
-  const inviteable =
-    friends?.filter(
-      (f) => !memberSet.has(f.username) && !pendingSet.has(f.username),
-    ) ?? [];
 
   return (
     <div>
@@ -207,50 +266,29 @@ export function TripDashboard() {
               <p className="mt-4 text-sm text-red-600">{inviteError}</p>
             )}
 
-            <form onSubmit={onSend} className="mt-4 space-y-3">
-              <label className="block">
+            <form onSubmit={onSend} className="mt-4 space-y-4">
+              <div>
                 <span className="text-xs font-medium text-ink-600">
                   Friend
                 </span>
-                {friends === null ? (
-                  <p className="mt-1 text-sm text-ink-500">Loading…</p>
-                ) : friends.length === 0 ? (
-                  <p className="mt-1 text-sm text-ink-500">
-                    You have no friends yet — add some on Friends.
-                  </p>
-                ) : inviteable.length === 0 ? (
-                  <p className="mt-1 text-sm text-ink-500">
-                    All your friends are already in this trip or invited.
-                  </p>
-                ) : (
-                  <select
-                    value={pickedFriend}
-                    onChange={(e) => setPickedFriend(e.target.value)}
-                    className="mt-1 w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm"
-                  >
-                    <option value="">Pick a friend…</option>
-                    {inviteable.map((f) => (
-                      <option key={f.username} value={f.username}>
-                        {f.displayName || f.username} (@{f.username})
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </label>
-              <label className="block">
+                <FriendPicker
+                  className="mt-1"
+                  friends={friends}
+                  inviteable={inviteable}
+                  query={friendQuery}
+                  setQuery={setFriendQuery}
+                  picked={pickedFriend}
+                  setPicked={setPickedFriend}
+                />
+              </div>
+              <div>
                 <span className="text-xs font-medium text-ink-600">Role</span>
-                <select
-                  value={pickedRole}
-                  onChange={(e) => setPickedRole(e.target.value as Role)}
-                  className="mt-1 w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm"
-                >
-                  {INVITEABLE_ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {prettyRole(r)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <RolePills
+                  className="mt-2"
+                  picked={pickedRole}
+                  setPicked={setPickedRole}
+                />
+              </div>
               <Button
                 type="submit"
                 className="w-full"
@@ -303,6 +341,144 @@ export function TripDashboard() {
           <MembersCard className="p-6" members={members} />
         </div>
       )}
+    </div>
+  );
+}
+
+function FriendPicker({
+  className,
+  friends,
+  inviteable,
+  query,
+  setQuery,
+  picked,
+  setPicked,
+}: {
+  className?: string;
+  friends: Friend[] | null;
+  inviteable: Friend[];
+  query: string;
+  setQuery: (s: string) => void;
+  picked: string;
+  setPicked: (u: string) => void;
+}) {
+  if (friends === null) {
+    return (
+      <p className={[className ?? "", "text-sm text-ink-500"].join(" ")}>
+        Loading…
+      </p>
+    );
+  }
+  if (friends.length === 0) {
+    return (
+      <p className={[className ?? "", "text-sm text-ink-500"].join(" ")}>
+        You have no friends yet — add some on Friends.
+      </p>
+    );
+  }
+  if (inviteable.length === 0) {
+    return (
+      <p className={[className ?? "", "text-sm text-ink-500"].join(" ")}>
+        All your friends are already in this trip or invited.
+      </p>
+    );
+  }
+
+  const norm = query.trim().toLowerCase();
+  const filtered =
+    norm.length === 0
+      ? inviteable
+      : inviteable.filter(
+          (f) =>
+            f.username.toLowerCase().includes(norm) ||
+            f.displayName.toLowerCase().includes(norm),
+        );
+
+  return (
+    <div className={[className ?? "", "space-y-2"].join(" ")}>
+      <Input
+        placeholder="Search by name or @username"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        autoComplete="off"
+      />
+      <div className="max-h-48 overflow-y-auto rounded-md border border-ink-200 bg-white">
+        {filtered.length === 0 ? (
+          <p className="px-3 py-2 text-sm text-ink-500">No matches.</p>
+        ) : (
+          <ul className="divide-y divide-ink-100">
+            {filtered.map((f) => {
+              const selected = picked === f.username;
+              return (
+                <li key={f.username}>
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setPicked(f.username)}
+                    className={[
+                      "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors",
+                      selected
+                        ? "bg-ink-100 text-ink-950"
+                        : "text-ink-700 hover:bg-ink-50",
+                    ].join(" ")}
+                  >
+                    <span className="min-w-0 truncate">
+                      <span className="font-medium">
+                        {f.displayName || f.username}
+                      </span>
+                      <span className="ml-1 text-ink-500">@{f.username}</span>
+                    </span>
+                    {selected && (
+                      <span className="ml-2 shrink-0 text-[10px] uppercase tracking-wider text-ink-500">
+                        Selected
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RolePills({
+  className,
+  picked,
+  setPicked,
+}: {
+  className?: string;
+  picked: Role;
+  setPicked: (r: Role) => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Invite role"
+      className={[className ?? "", "flex flex-wrap gap-2"].join(" ")}
+    >
+      {INVITEABLE_ROLES.map((r) => {
+        const selected = picked === r;
+        return (
+          <button
+            key={r}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => setPicked(r)}
+            className={[
+              "rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors",
+              selected
+                ? "border-ink-950 bg-ink-950 text-white"
+                : "border-ink-200 bg-white text-ink-600 hover:border-ink-400",
+            ].join(" ")}
+          >
+            {prettyRole(r)}
+          </button>
+        );
+      })}
     </div>
   );
 }

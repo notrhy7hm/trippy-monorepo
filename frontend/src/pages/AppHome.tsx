@@ -16,24 +16,31 @@ type TripInvite = {
   createdAt: string;
 };
 
+type AcceptResponse = {
+  slug?: string;
+};
+
 export function AppHome() {
   const { user } = useAuth();
   const nav = useNavigate();
 
   const [invites, setInvites] = useState<TripInvite[] | null>(null);
   const [busyToken, setBusyToken] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // loadError is shown subtly when the invites list itself cannot load.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // actionError is shown inside the invites Card when accept/decline fails.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setError(null);
     try {
       const xs = await api<TripInvite[]>("GET", "/me/trip-invites");
       setInvites(xs);
+      setLoadError(null);
     } catch (err) {
-      setError(
+      setInvites((prev) => prev ?? []);
+      setLoadError(
         err instanceof ApiError ? err.message : "Failed to load invites",
       );
-      setInvites([]);
     }
   }, []);
 
@@ -42,34 +49,43 @@ export function AppHome() {
   }, [refresh]);
 
   async function accept(inv: TripInvite) {
-    setError(null);
+    setActionError(null);
     setBusyToken(inv.token);
     try {
-      await api("POST", `/invites/${inv.token}/accept`);
-      if (inv.trip?.slug) {
-        nav(`/app/trips/${inv.trip.slug}`);
+      // Backend returns the joined Trip on accept; prefer its slug because
+      // it reflects the actual trip the user just joined. Fall back to the
+      // invite's snapshot only if the response somehow omits it.
+      const resp = await api<AcceptResponse>(
+        "POST",
+        `/invites/${inv.token}/accept`,
+      );
+      const slug = resp?.slug ?? inv.trip?.slug;
+      if (slug) {
+        nav(`/app/trips/${slug}`);
         return;
       }
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Accept failed");
+      setActionError(err instanceof ApiError ? err.message : "Accept failed");
     } finally {
       setBusyToken(null);
     }
   }
 
   async function decline(inv: TripInvite) {
-    setError(null);
+    setActionError(null);
     setBusyToken(inv.token);
     try {
       await api("POST", `/invites/${inv.token}/decline`);
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Decline failed");
+      setActionError(err instanceof ApiError ? err.message : "Decline failed");
     } finally {
       setBusyToken(null);
     }
   }
+
+  const hasInvites = (invites?.length ?? 0) > 0;
 
   return (
     <div>
@@ -78,18 +94,21 @@ export function AppHome() {
       </h1>
       <p className="mt-2 text-ink-500">Pick a trip, or start a new one.</p>
 
-      {error && (
-        <Card className="mt-6 border-red-200 bg-red-50/40 p-4">
-          <p className="text-sm text-red-700">{error}</p>
-        </Card>
+      {!hasInvites && loadError && (
+        <p className="mt-4 text-xs text-ink-500">
+          Trip invites are temporarily unavailable.
+        </p>
       )}
 
-      {invites && invites.length > 0 && (
+      {hasInvites && invites && (
         <Card className="mt-8 p-6">
           <h2 className="text-lg font-medium">Trip invites</h2>
           <p className="mt-1 text-sm text-ink-500">
             People have invited you to plan trips together.
           </p>
+          {actionError && (
+            <p className="mt-3 text-sm text-red-600">{actionError}</p>
+          )}
           <ul className="mt-4 divide-y divide-ink-100">
             {invites.map((inv) => (
               <li

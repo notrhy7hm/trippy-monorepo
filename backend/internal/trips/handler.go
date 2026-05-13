@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/trippyai/trippy/backend/internal/api"
+	"github.com/trippyai/trippy/backend/internal/users"
 )
 
 type Handler struct{ svc *Service }
@@ -117,13 +118,95 @@ func (h *Handler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	api.JSON(w, http.StatusOK, ms)
 }
 
-// CreateInvitePlaceholder is intentionally a stub for M0. M1 replaces it with
-// real invite tokens, email lookup, and notifications.
-func (h *Handler) CreateInvitePlaceholder(w http.ResponseWriter, r *http.Request) {
-	api.JSON(w, http.StatusAccepted, map[string]string{
-		"status":  "not_implemented",
-		"message": "trip invites land in M1",
+// ---------------------------------------------------------------------------
+// invites
+// ---------------------------------------------------------------------------
+
+type createInviteReq struct {
+	Identifier string `json:"identifier"`
+	Role       Role   `json:"role,omitempty"`
+}
+
+func (h *Handler) CreateInvite(w http.ResponseWriter, r *http.Request) {
+	var in createInviteReq
+	if err := api.DecodeJSON(r, &in); err != nil {
+		api.Err(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	slug := chi.URLParam(r, "tripSlug")
+	inv, err := h.svc.CreateInvite(r.Context(), api.UserID(r.Context()), slug, CreateInviteInput{
+		Identifier: in.Identifier,
+		Role:       in.Role,
 	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	api.JSON(w, http.StatusCreated, inv)
+}
+
+func (h *Handler) ListInvites(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "tripSlug")
+	invs, err := h.svc.ListInvites(r.Context(), api.UserID(r.Context()), slug)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if invs == nil {
+		invs = []Invite{}
+	}
+	api.JSON(w, http.StatusOK, invs)
+}
+
+func (h *Handler) RevokeInvite(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "tripSlug")
+	token := chi.URLParam(r, "token")
+	if err := h.svc.RevokeInvite(r.Context(), api.UserID(r.Context()), slug, token); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) PreviewInvite(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	inv, err := h.svc.PreviewInvite(r.Context(), api.UserID(r.Context()), token)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	api.JSON(w, http.StatusOK, inv)
+}
+
+func (h *Handler) AcceptInvite(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	trip, err := h.svc.AcceptInvite(r.Context(), api.UserID(r.Context()), token)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	api.JSON(w, http.StatusOK, trip)
+}
+
+func (h *Handler) DeclineInvite(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	if err := h.svc.DeclineInvite(r.Context(), api.UserID(r.Context()), token); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ListMyInvites(w http.ResponseWriter, r *http.Request) {
+	invs, err := h.svc.ListMyInvites(r.Context(), api.UserID(r.Context()))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if invs == nil {
+		invs = []Invite{}
+	}
+	api.JSON(w, http.StatusOK, invs)
 }
 
 func writeError(w http.ResponseWriter, err error) {
@@ -132,6 +215,28 @@ func writeError(w http.ResponseWriter, err error) {
 		api.Err(w, http.StatusNotFound, "not_found", "trip not found")
 	case errors.Is(err, ErrForbidden):
 		api.Err(w, http.StatusForbidden, "forbidden", "you do not have access to this trip")
+	case errors.Is(err, users.ErrNotFound):
+		api.Err(w, http.StatusNotFound, "user_not_found", "user not found")
+	case errors.Is(err, ErrInvalidRole):
+		api.Err(w, http.StatusBadRequest, "invalid_role", "role is not assignable")
+	case errors.Is(err, ErrInviteBadIdentifier):
+		api.Err(w, http.StatusBadRequest, "bad_request", "identifier is required")
+	case errors.Is(err, ErrCannotInviteSelf):
+		api.Err(w, http.StatusBadRequest, "self_invite", "you cannot invite yourself")
+	case errors.Is(err, ErrAlreadyMember):
+		api.Err(w, http.StatusConflict, "already_member", "user is already a trip member")
+	case errors.Is(err, ErrNotFriends):
+		api.Err(w, http.StatusForbidden, "not_friends", "only friends can be invited to a trip")
+	case errors.Is(err, ErrInviteExists):
+		api.Err(w, http.StatusConflict, "invite_exists", "a pending invite already exists")
+	case errors.Is(err, ErrInviteNotFound):
+		api.Err(w, http.StatusNotFound, "invite_not_found", "trip invite not found")
+	case errors.Is(err, ErrInviteNotPending):
+		api.Err(w, http.StatusConflict, "invite_not_pending", "this invite is no longer pending")
+	case errors.Is(err, ErrInviteExpired):
+		api.Err(w, http.StatusGone, "invite_expired", "this invite has expired")
+	case errors.Is(err, ErrInviteNotYours):
+		api.Err(w, http.StatusForbidden, "invite_not_yours", "this invite is addressed to someone else")
 	default:
 		slog.Error("trips internal error", "err", err)
 		api.Err(w, http.StatusInternalServerError, "internal", "something went wrong")

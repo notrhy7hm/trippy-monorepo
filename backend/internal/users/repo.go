@@ -67,6 +67,20 @@ func (r *Repo) ByID(ctx context.Context, id uuid.UUID) (User, error) {
 	return u, err
 }
 
+func (r *Repo) ByEmail(ctx context.Context, email string) (User, error) {
+	var u User
+	err := r.db.GetContext(ctx, &u, `
+		SELECT `+userColumns+`
+		FROM users u
+		LEFT JOIN user_profiles p ON p.user_id = u.id
+		WHERE u.email = $1 AND u.deleted_at IS NULL
+	`, email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	return u, err
+}
+
 func (r *Repo) ByUsername(ctx context.Context, username string) (User, error) {
 	var u User
 	err := r.db.GetContext(ctx, &u, `

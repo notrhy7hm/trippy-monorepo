@@ -75,10 +75,20 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/trips/{tripSlug}", tripsH.Get)
 			r.Patch("/trips/{tripSlug}", tripsH.Update)
 			r.Delete("/trips/{tripSlug}", tripsH.Delete)
-
-			// M0 placeholder — M1 replaces with real invites
 			r.Get("/trips/{tripSlug}/members", tripsH.ListMembers)
-			r.Post("/trips/{tripSlug}/invites", tripsH.CreateInvitePlaceholder)
+
+			// trip-scoped invites (owner/admin only at service layer)
+			r.Get("/trips/{tripSlug}/invites", tripsH.ListInvites)
+			r.Post("/trips/{tripSlug}/invites", tripsH.CreateInvite)
+			r.Delete("/trips/{tripSlug}/invites/{token}", tripsH.RevokeInvite)
+
+			// token-scoped invite actions (caller must be the invitee)
+			r.Get("/invites/{token}", tripsH.PreviewInvite)
+			r.Post("/invites/{token}/accept", tripsH.AcceptInvite)
+			r.Post("/invites/{token}/decline", tripsH.DeclineInvite)
+
+			// per-user view of pending invites
+			r.Get("/me/trip-invites", tripsH.ListMyInvites)
 		})
 	})
 

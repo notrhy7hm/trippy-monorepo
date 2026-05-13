@@ -23,6 +23,10 @@ func (s *Service) ByUsername(ctx context.Context, username string) (User, error)
 	return s.repo.ByUsername(ctx, username)
 }
 
+func (s *Service) ByEmail(ctx context.Context, email string) (User, error) {
+	return s.repo.ByEmail(ctx, strings.ToLower(strings.TrimSpace(email)))
+}
+
 func (s *Service) FindForLogin(ctx context.Context, identifier string) (User, string, error) {
 	return s.repo.FindForLogin(ctx, identifier)
 }

@@ -77,6 +77,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Delete("/trips/{tripSlug}", tripsH.Delete)
 			r.Get("/trips/{tripSlug}/members", tripsH.ListMembers)
 			r.Patch("/trips/{tripSlug}/members/{username}/role", tripsH.UpdateMemberRole)
+			r.Patch("/trips/{tripSlug}/members/{username}/tags", tripsH.UpdateMemberTags)
 
 			// trip-scoped invites (owner/admin only at service layer)
 			r.Get("/trips/{tripSlug}/invites", tripsH.ListInvites)

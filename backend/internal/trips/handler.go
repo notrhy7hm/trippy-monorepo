@@ -126,6 +126,26 @@ type updateMemberRoleReq struct {
 	Role Role `json:"role"`
 }
 
+type updateMemberTagsReq struct {
+	Tags []string `json:"tags"`
+}
+
+func (h *Handler) UpdateMemberTags(w http.ResponseWriter, r *http.Request) {
+	var in updateMemberTagsReq
+	if err := api.DecodeJSON(r, &in); err != nil {
+		api.Err(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	slug := chi.URLParam(r, "tripSlug")
+	username := chi.URLParam(r, "username")
+	m, err := h.svc.UpdateMemberTags(r.Context(), api.UserID(r.Context()), slug, username, in.Tags)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	api.JSON(w, http.StatusOK, m)
+}
+
 func (h *Handler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 	var in updateMemberRoleReq
 	if err := api.DecodeJSON(r, &in); err != nil {
@@ -259,6 +279,15 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrCannotChangeOwnerRole):
 		api.Err(w, http.StatusBadRequest, "cannot_change_owner",
 			"the owner role cannot be changed")
+	case errors.Is(err, ErrInvalidTag):
+		api.Err(w, http.StatusBadRequest, "invalid_tag",
+			"tags must use only lowercase letters, digits, dashes, or underscores")
+	case errors.Is(err, ErrTagTooLong):
+		api.Err(w, http.StatusBadRequest, "tag_too_long",
+			"tags must be 24 characters or fewer")
+	case errors.Is(err, ErrTooManyTags):
+		api.Err(w, http.StatusBadRequest, "too_many_tags",
+			"a member can have at most 8 tags")
 	case errors.Is(err, ErrInviteExists):
 		api.Err(w, http.StatusConflict, "invite_exists", "a pending invite already exists")
 	case errors.Is(err, ErrInviteNotFound):

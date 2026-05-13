@@ -376,6 +376,38 @@ func (r *Repo) AcceptInvite(ctx context.Context, token string, userID uuid.UUID)
 	return trip, nil
 }
 
+// UpdateMemberTags replaces the tags array of an existing trip_members row
+// and returns the updated Member shape. Tags are written as a text[] via
+// pq.Array; an empty slice clears the column to ARRAY[]::text[]. Returns
+// ErrMemberNotFound when no row matches (trip × user).
+func (r *Repo) UpdateMemberTags(ctx context.Context, tripID, userID uuid.UUID, tags []string) (Member, error) {
+	var m Member
+	var dbTags pq.StringArray
+	err := r.db.QueryRowxContext(ctx, `
+		WITH upd AS (
+			UPDATE trip_members SET tags = $3
+			WHERE trip_id = $1 AND user_id = $2
+			RETURNING user_id, role, tags
+		)
+		SELECT upd.user_id,
+		       u.username,
+		       COALESCE(p.display_name, u.username) AS display_name,
+		       upd.role,
+		       upd.tags
+		FROM upd
+		JOIN users u ON u.id = upd.user_id
+		LEFT JOIN user_profiles p ON p.user_id = u.id
+	`, tripID, userID, pq.Array(tags)).Scan(&m.UserID, &m.Username, &m.DisplayName, &m.Role, &dbTags)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Member{}, ErrMemberNotFound
+	}
+	if err != nil {
+		return Member{}, err
+	}
+	m.Tags = []string(dbTags)
+	return m, nil
+}
+
 // UpdateMemberRole flips the role of an existing trip_members row and
 // returns the updated Member shape (joined with users + user_profiles so
 // the caller gets the public-facing fields, not just UUIDs). Returns

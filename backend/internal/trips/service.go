@@ -24,6 +24,9 @@ var (
 	ErrInviteBadIdentifier     = errors.New("invitee identifier is required")
 	ErrEmailInvitesUnsupported = errors.New("email invites for unregistered users are not supported in M1")
 	ErrCannotChangeOwnerRole   = errors.New("owner role cannot be changed")
+	ErrInvalidTag              = errors.New("invalid tag")
+	ErrTagTooLong              = errors.New("tag is too long")
+	ErrTooManyTags             = errors.New("too many tags")
 )
 
 // FriendsChecker is the minimum surface trips needs from the friends module
@@ -164,6 +167,48 @@ func (s *Service) UpdateMemberRole(ctx context.Context, callerID uuid.UUID, slug
 	}
 
 	return s.repo.UpdateMemberRole(ctx, trip.ID, target.ID, newRole)
+}
+
+// UpdateMemberTags replaces a trip member's tag list. Only the trip owner
+// may call this. Tags are normalized (trim, lowercase, internal whitespace
+// to '-', dedup; preserves first-occurrence order) and validated; the
+// owner's own tags can be updated because tags are labels, not permissions.
+func (s *Service) UpdateMemberTags(ctx context.Context, callerID uuid.UUID, slug, targetUsername string, tags []string) (Member, error) {
+	trip, err := s.repo.BySlug(ctx, slug)
+	if err != nil {
+		return Member{}, err
+	}
+
+	callerRole, ok, err := s.repo.IsMember(ctx, trip.ID, callerID)
+	if err != nil {
+		return Member{}, err
+	}
+	if !ok || callerRole != RoleOwner {
+		return Member{}, ErrForbidden
+	}
+
+	normalized, err := normalizeTags(tags)
+	if err != nil {
+		return Member{}, err
+	}
+
+	target, err := s.users.ByUsername(ctx, strings.ToLower(strings.TrimSpace(targetUsername)))
+	if err != nil {
+		if errors.Is(err, users.ErrNotFound) {
+			return Member{}, ErrMemberNotFound
+		}
+		return Member{}, err
+	}
+
+	_, isMember, err := s.repo.IsMember(ctx, trip.ID, target.ID)
+	if err != nil {
+		return Member{}, err
+	}
+	if !isMember {
+		return Member{}, ErrMemberNotFound
+	}
+
+	return s.repo.UpdateMemberTags(ctx, trip.ID, target.ID, normalized)
 }
 
 // ---------------------------------------------------------------------------

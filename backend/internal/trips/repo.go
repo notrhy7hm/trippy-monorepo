@@ -292,16 +292,16 @@ func (r *Repo) DeclineInvite(ctx context.Context, token string, userID uuid.UUID
 // membership row using the invite's stored role. The transaction enforces
 // every invariant directly:
 //
-//   1. SELECT FOR UPDATE locks the invite row and requires
-//      status='pending', expires_at > now(), invitee_user_id = caller.
-//      0 rows -> ErrInviteNotPending (covers not-found, expired,
-//      not-yours, and already-acted-on cases).
-//   2. EXISTS membership check inside the same transaction. If the caller
-//      is already a member, the invite is *not* marked accepted and
-//      ErrAlreadyMember is returned.
-//   3. INSERT membership without ON CONFLICT — a PK violation here would
-//      indicate a race that step 2 missed; it is mapped to ErrAlreadyMember
-//      rather than silently swallowed.
+//  1. SELECT FOR UPDATE locks the invite row and requires
+//     status='pending', expires_at > now(), invitee_user_id = caller.
+//     0 rows -> ErrInviteNotPending (covers not-found, expired,
+//     not-yours, and already-acted-on cases).
+//  2. EXISTS membership check inside the same transaction. If the caller
+//     is already a member, the invite is *not* marked accepted and
+//     ErrAlreadyMember is returned.
+//  3. INSERT membership without ON CONFLICT — a PK violation here would
+//     indicate a race that step 2 missed; it is mapped to ErrAlreadyMember
+//     rather than silently swallowed.
 func (r *Repo) AcceptInvite(ctx context.Context, token string, userID uuid.UUID) (Trip, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

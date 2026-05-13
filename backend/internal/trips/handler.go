@@ -227,6 +227,9 @@ func writeError(w http.ResponseWriter, err error) {
 		api.Err(w, http.StatusConflict, "already_member", "user is already a trip member")
 	case errors.Is(err, ErrNotFriends):
 		api.Err(w, http.StatusForbidden, "not_friends", "only friends can be invited to a trip")
+	case errors.Is(err, ErrEmailInvitesUnsupported):
+		api.Err(w, http.StatusUnprocessableEntity, "email_invites_not_supported",
+			"inviting unregistered users by email is not supported")
 	case errors.Is(err, ErrInviteExists):
 		api.Err(w, http.StatusConflict, "invite_exists", "a pending invite already exists")
 	case errors.Is(err, ErrInviteNotFound):

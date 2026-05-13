@@ -222,18 +222,17 @@ func (r *Repo) ListTripInvites(ctx context.Context, tripID uuid.UUID) ([]inviteR
 	return rows, err
 }
 
-// ListPendingForUser returns the viewer's pending invites — matched either
-// by invitee_user_id or by lowercase email.
-func (r *Repo) ListPendingForUser(ctx context.Context, userID uuid.UUID, email string) ([]inviteRow, error) {
+// ListPendingForUser returns the viewer's pending, unexpired invites,
+// matched by invitee_user_id only. M1 does not surface email-only invites.
+func (r *Repo) ListPendingForUser(ctx context.Context, userID uuid.UUID) ([]inviteRow, error) {
 	var rows []inviteRow
 	err := r.db.SelectContext(ctx, &rows, `
 		SELECT `+inviteSelectColumns+inviteJoins+`
 		WHERE i.status = 'pending'
 		  AND i.expires_at > now()
-		  AND (i.invitee_user_id = $1
-		       OR lower(i.invitee_email) = lower($2))
+		  AND i.invitee_user_id = $1
 		ORDER BY i.created_at DESC
-	`, userID, email)
+	`, userID)
 	return rows, err
 }
 
@@ -266,13 +265,18 @@ func (r *Repo) MarkExpiredByToken(ctx context.Context, token string) error {
 	return err
 }
 
-// DeclineInvite flips a pending invite to declined.
-func (r *Repo) DeclineInvite(ctx context.Context, token string) error {
+// DeclineInvite flips a pending, unexpired, caller-owned invite to declined.
+// All invariants are enforced in the UPDATE predicate so the mutation is
+// safe even if a pre-check raced.
+func (r *Repo) DeclineInvite(ctx context.Context, token string, userID uuid.UUID) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE trip_invites
 		   SET status='declined', responded_at=now()
-		 WHERE token = $1 AND status='pending'
-	`, token)
+		 WHERE token = $1
+		   AND status = 'pending'
+		   AND expires_at > now()
+		   AND invitee_user_id = $2
+	`, token, userID)
 	if err != nil {
 		return err
 	}
@@ -283,9 +287,20 @@ func (r *Repo) DeclineInvite(ctx context.Context, token string) error {
 	return nil
 }
 
-// AcceptInvite atomically flips a pending invite to accepted and inserts
-// the membership row using the invite's stored role. Returns the joined
-// trip so the caller can redirect / show confirmation.
+// AcceptInvite atomically flips a pending invite to accepted and inserts the
+// membership row using the invite's stored role. The transaction enforces
+// every invariant directly:
+//
+//   1. SELECT FOR UPDATE locks the invite row and requires
+//      status='pending', expires_at > now(), invitee_user_id = caller.
+//      0 rows -> ErrInviteNotPending (covers not-found, expired,
+//      not-yours, and already-acted-on cases).
+//   2. EXISTS membership check inside the same transaction. If the caller
+//      is already a member, the invite is *not* marked accepted and
+//      ErrAlreadyMember is returned.
+//   3. INSERT membership without ON CONFLICT — a PK violation here would
+//      indicate a race that step 2 missed; it is mapped to ErrAlreadyMember
+//      rather than silently swallowed.
 func (r *Repo) AcceptInvite(ctx context.Context, token string, userID uuid.UUID) (Trip, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -296,11 +311,14 @@ func (r *Repo) AcceptInvite(ctx context.Context, token string, userID uuid.UUID)
 	var tripID uuid.UUID
 	var role Role
 	err = tx.QueryRowxContext(ctx, `
-		UPDATE trip_invites
-		   SET status='accepted', responded_at=now()
-		 WHERE token = $1 AND status='pending'
-		 RETURNING trip_id, role
-	`, token).Scan(&tripID, &role)
+		SELECT trip_id, role
+		FROM trip_invites
+		WHERE token = $1
+		  AND status = 'pending'
+		  AND expires_at > now()
+		  AND invitee_user_id = $2
+		FOR UPDATE
+	`, token, userID).Scan(&tripID, &role)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Trip{}, ErrInviteNotPending
@@ -308,21 +326,43 @@ func (r *Repo) AcceptInvite(ctx context.Context, token string, userID uuid.UUID)
 		return Trip{}, err
 	}
 
+	var alreadyMember bool
+	if err := tx.GetContext(ctx, &alreadyMember, `
+		SELECT EXISTS(
+			SELECT 1 FROM trip_members WHERE trip_id = $1 AND user_id = $2
+		)
+	`, tripID, userID); err != nil {
+		return Trip{}, err
+	}
+	if alreadyMember {
+		return Trip{}, ErrAlreadyMember
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE trip_invites
+		   SET status='accepted', responded_at=now()
+		 WHERE token = $1
+	`, token); err != nil {
+		return Trip{}, err
+	}
+
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO trip_members (trip_id, user_id, role, tags)
 		VALUES ($1, $2, $3, ARRAY[]::text[])
-		ON CONFLICT (trip_id, user_id) DO NOTHING
 	`, tripID, userID, role); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return Trip{}, ErrAlreadyMember
+		}
 		return Trip{}, err
 	}
 
 	var trip Trip
-	err = tx.GetContext(ctx, &trip, `
+	if err := tx.GetContext(ctx, &trip, `
 		SELECT `+tripColumns+`
 		FROM trips
 		WHERE id = $1 AND deleted_at IS NULL
-	`, tripID)
-	if err != nil {
+	`, tripID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Trip{}, ErrNotFound
 		}

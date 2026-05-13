@@ -14,14 +14,15 @@ import (
 )
 
 var (
-	ErrForbidden          = errors.New("forbidden")
-	ErrInvalidRole        = errors.New("invalid role")
-	ErrCannotInviteSelf   = errors.New("cannot invite yourself")
-	ErrAlreadyMember      = errors.New("user is already a trip member")
-	ErrNotFriends         = errors.New("only friends can be invited")
-	ErrInviteExpired      = errors.New("trip invite is expired")
-	ErrInviteNotYours     = errors.New("invite was not addressed to you")
-	ErrInviteBadIdentifier = errors.New("invitee identifier is required")
+	ErrForbidden               = errors.New("forbidden")
+	ErrInvalidRole             = errors.New("invalid role")
+	ErrCannotInviteSelf        = errors.New("cannot invite yourself")
+	ErrAlreadyMember           = errors.New("user is already a trip member")
+	ErrNotFriends              = errors.New("only friends can be invited")
+	ErrInviteExpired           = errors.New("trip invite is expired")
+	ErrInviteNotYours          = errors.New("invite was not addressed to you")
+	ErrInviteBadIdentifier     = errors.New("invitee identifier is required")
+	ErrEmailInvitesUnsupported = errors.New("email invites for unregistered users are not supported in M1")
 )
 
 // FriendsChecker is the minimum surface trips needs from the friends module
@@ -149,27 +150,23 @@ func (s *Service) CreateInvite(ctx context.Context, callerID uuid.UUID, slug str
 		return Invite{}, ErrInviteBadIdentifier
 	}
 
-	var (
-		inviteeUserID *uuid.UUID
-		inviteeEmail  *string
-	)
+	var inviteeUserID *uuid.UUID
 
 	if strings.Contains(ident, "@") {
-		// Email path: resolve to user if one exists, else allow email-only.
+		// Email path: must resolve to a registered user. M1 disables
+		// actionable email-only invites; the column stays for future use.
 		u, err := s.users.ByEmail(ctx, ident)
-		switch {
-		case errors.Is(err, users.ErrNotFound):
-			e := ident
-			inviteeEmail = &e
-		case err != nil:
-			return Invite{}, err
-		default:
-			if err := s.requireFriendship(ctx, callerID, u.ID); err != nil {
-				return Invite{}, err
-			}
-			id := u.ID
-			inviteeUserID = &id
+		if errors.Is(err, users.ErrNotFound) {
+			return Invite{}, ErrEmailInvitesUnsupported
 		}
+		if err != nil {
+			return Invite{}, err
+		}
+		if err := s.requireFriendship(ctx, callerID, u.ID); err != nil {
+			return Invite{}, err
+		}
+		id := u.ID
+		inviteeUserID = &id
 	} else {
 		u, err := s.users.ByUsername(ctx, ident)
 		if err != nil {
@@ -185,14 +182,18 @@ func (s *Service) CreateInvite(ctx context.Context, callerID uuid.UUID, slug str
 		inviteeUserID = &id
 	}
 
-	if inviteeUserID != nil {
-		_, isMember, err := s.repo.IsMember(ctx, trip.ID, *inviteeUserID)
-		if err != nil {
-			return Invite{}, err
-		}
-		if isMember {
-			return Invite{}, ErrAlreadyMember
-		}
+	// inviteeUserID is always non-nil in M1 (email-only path was rejected
+	// above). The guard is defensive in case the branches change later.
+	if inviteeUserID == nil {
+		return Invite{}, ErrEmailInvitesUnsupported
+	}
+
+	_, isMember, err := s.repo.IsMember(ctx, trip.ID, *inviteeUserID)
+	if err != nil {
+		return Invite{}, err
+	}
+	if isMember {
+		return Invite{}, ErrAlreadyMember
 	}
 
 	token, err := newInviteToken()
@@ -203,7 +204,6 @@ func (s *Service) CreateInvite(ctx context.Context, callerID uuid.UUID, slug str
 	row, err := s.repo.CreateInvite(ctx, inviteInsertRow{
 		TripID:          trip.ID,
 		InviteeUserID:   inviteeUserID,
-		InviteeEmail:    inviteeEmail,
 		Token:           token,
 		ExpiresAt:       time.Now().Add(defaultInviteTTL),
 		InvitedByUserID: callerID,
@@ -273,17 +273,13 @@ func (s *Service) DeclineInvite(ctx context.Context, callerID uuid.UUID, token s
 	if _, err := s.loadActionableInvite(ctx, callerID, token); err != nil {
 		return err
 	}
-	return s.repo.DeclineInvite(ctx, token)
+	return s.repo.DeclineInvite(ctx, token, callerID)
 }
 
-// ListMyInvites returns pending invites addressed to the caller, matched by
-// user ID or email.
+// ListMyInvites returns pending invites addressed to the caller. M1 only
+// surfaces user-bound invites (email-only invites are not actionable here).
 func (s *Service) ListMyInvites(ctx context.Context, callerID uuid.UUID) ([]Invite, error) {
-	caller, err := s.users.ByID(ctx, callerID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.repo.ListPendingForUser(ctx, callerID, caller.Email)
+	rows, err := s.repo.ListPendingForUser(ctx, callerID)
 	if err != nil {
 		return nil, err
 	}
@@ -291,6 +287,8 @@ func (s *Service) ListMyInvites(ctx context.Context, callerID uuid.UUID) ([]Invi
 }
 
 // loadActionableInvite expires the row lazily, then loads and authorizes it.
+// M1 only surfaces invites bound to a registered invitee_user_id; any
+// email-only row is treated as not-yours.
 func (s *Service) loadActionableInvite(ctx context.Context, callerID uuid.UUID, token string) (inviteRow, error) {
 	if err := s.repo.MarkExpiredByToken(ctx, token); err != nil {
 		return inviteRow{}, err
@@ -307,21 +305,7 @@ func (s *Service) loadActionableInvite(ctx context.Context, callerID uuid.UUID, 
 	default:
 		return inviteRow{}, ErrInviteNotPending
 	}
-	caller, err := s.users.ByID(ctx, callerID)
-	if err != nil {
-		return inviteRow{}, err
-	}
-	switch {
-	case row.InviteeUserID != nil:
-		if *row.InviteeUserID != callerID {
-			return inviteRow{}, ErrInviteNotYours
-		}
-	case row.InviteeEmail != nil:
-		if !strings.EqualFold(*row.InviteeEmail, caller.Email) {
-			return inviteRow{}, ErrInviteNotYours
-		}
-	default:
-		// Schema CHECK forbids this; defensive default.
+	if row.InviteeUserID == nil || *row.InviteeUserID != callerID {
 		return inviteRow{}, ErrInviteNotYours
 	}
 	return row, nil

@@ -284,12 +284,20 @@ export function TripDashboard() {
     setTagInput("");
   }
 
-  function closeEditors() {
+  // closeEditors collapses any open role/tag editor row and (by default)
+  // also clears the local memberError. Pass { clearError: false } when a
+  // caller has just set a member error that must remain visible after the
+  // editor closes (e.g. a 403/404 from PATCH /tags where reloadTrip() also
+  // ran).
+  function closeEditors(opts: { clearError?: boolean } = {}) {
+    const { clearError = true } = opts;
     setExpandedMember(null);
     setTagsEditingMember(null);
     setTagDraft([]);
     setTagInput("");
-    setMemberError(null);
+    if (clearError) {
+      setMemberError(null);
+    }
   }
 
   function onRemoveTag(t: string) {
@@ -413,14 +421,15 @@ export function TripDashboard() {
       // 403 / 404 typically mean stale state (permissions drifted, member
       // removed) — refresh and close the editor. 400 means the backend
       // disagreed with the payload; keep the editor open so the user can
-      // fix it.
+      // fix it. Pass clearError:false so the memberError we just set
+      // survives closeEditors().
       if (
         err instanceof ApiError &&
         (err.status === 403 || err.status === 404)
       ) {
         await reloadTrip();
         if (gen !== genRef.current) return;
-        closeEditors();
+        closeEditors({ clearError: false });
       }
     } finally {
       if (gen === genRef.current) {

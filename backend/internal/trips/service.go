@@ -27,6 +27,7 @@ var (
 	ErrInvalidTag              = errors.New("invalid tag")
 	ErrTagTooLong              = errors.New("tag is too long")
 	ErrTooManyTags             = errors.New("too many tags")
+	ErrTagsRequired            = errors.New("tags field is required")
 )
 
 // FriendsChecker is the minimum surface trips needs from the friends module

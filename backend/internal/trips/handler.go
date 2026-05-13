@@ -127,7 +127,10 @@ type updateMemberRoleReq struct {
 }
 
 type updateMemberTagsReq struct {
-	Tags []string `json:"tags"`
+	// *[]string distinguishes an omitted (or null) field from an explicit
+	// empty array. `{}` and `{"tags":null}` -> nil pointer -> ErrTagsRequired.
+	// `{"tags":[]}` -> non-nil pointer to empty slice -> clears tags.
+	Tags *[]string `json:"tags"`
 }
 
 func (h *Handler) UpdateMemberTags(w http.ResponseWriter, r *http.Request) {
@@ -136,9 +139,13 @@ func (h *Handler) UpdateMemberTags(w http.ResponseWriter, r *http.Request) {
 		api.Err(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if in.Tags == nil {
+		writeError(w, ErrTagsRequired)
+		return
+	}
 	slug := chi.URLParam(r, "tripSlug")
 	username := chi.URLParam(r, "username")
-	m, err := h.svc.UpdateMemberTags(r.Context(), api.UserID(r.Context()), slug, username, in.Tags)
+	m, err := h.svc.UpdateMemberTags(r.Context(), api.UserID(r.Context()), slug, username, *in.Tags)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -288,6 +295,9 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrTooManyTags):
 		api.Err(w, http.StatusBadRequest, "too_many_tags",
 			"a member can have at most 8 tags")
+	case errors.Is(err, ErrTagsRequired):
+		api.Err(w, http.StatusBadRequest, "tags_required",
+			"tags field is required (use [] to clear)")
 	case errors.Is(err, ErrInviteExists):
 		api.Err(w, http.StatusConflict, "invite_exists", "a pending invite already exists")
 	case errors.Is(err, ErrInviteNotFound):

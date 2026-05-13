@@ -228,15 +228,21 @@ export function TripDashboard() {
   }
 
   async function onChangeRole(username: string, newRole: Role) {
-    if (!tripSlug) return;
+    // Block concurrent edits on any row while one PATCH is in flight.
+    if (!tripSlug || busyMember !== null) return;
+    // Pin to the current route generation; if the user navigates to a
+    // different trip while the PATCH is in flight, drop the response so
+    // we cannot patch the new trip's members.
+    const gen = genRef.current;
     setBusyMember(username);
     setMemberError(null);
     try {
       const updated = await api<Member>(
         "PATCH",
-        `/trips/${tripSlug}/members/${username}/role`,
+        `/trips/${tripSlug}/members/${encodeURIComponent(username)}/role`,
         { role: newRole },
       );
+      if (gen !== genRef.current) return;
       setMembers((prev) =>
         prev.map((m) =>
           m.username === username ? { ...m, ...updated } : m,
@@ -244,20 +250,34 @@ export function TripDashboard() {
       );
       setExpandedMember(null);
     } catch (err) {
+      if (gen !== genRef.current) return;
       if (err instanceof ApiError && err.status === 403) {
         setMemberError(
           "You do not have permission to manage roles in this trip.",
         );
-        // Re-derive permissions from the backend in case our role drifted.
-        await reloadTrip();
-        setExpandedMember(null);
       } else {
         setMemberError(
           err instanceof ApiError ? err.message : "Role change failed",
         );
       }
+      // 400 / 403 / 404 almost always mean our local members view is
+      // stale (target was removed, promoted/demoted, or our role
+      // drifted) — refresh so the panel re-syncs with the backend.
+      if (
+        err instanceof ApiError &&
+        (err.status === 400 || err.status === 403 || err.status === 404)
+      ) {
+        await reloadTrip();
+        if (gen !== genRef.current) return;
+      }
+      setExpandedMember(null);
     } finally {
-      setBusyMember(null);
+      // If the gen no longer matches we have already navigated; the
+      // tripSlug-change effect cleared busyMember as part of its reset,
+      // so leave its state alone.
+      if (gen === genRef.current) {
+        setBusyMember(null);
+      }
     }
   }
 
@@ -572,7 +592,10 @@ function MembersCard({
           const canEditRow = viewerIsOwner && m.role !== "owner";
           const isExpanded =
             canEditRow && expandedMember === m.username;
-          const isBusy = busyMember === m.username;
+          // Disable every role control on every row while any update
+          // is in flight, so a click on another row cannot race the
+          // pending PATCH.
+          const locked = busyMember !== null;
           return (
             <li
               key={m.username}
@@ -597,7 +620,7 @@ function MembersCard({
                         role="radio"
                         aria-checked={selected}
                         onClick={() => onChangeRole(m.username, r)}
-                        disabled={isBusy || selected}
+                        disabled={locked || selected}
                         className={[
                           "rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors",
                           selected
@@ -613,7 +636,7 @@ function MembersCard({
                   <button
                     type="button"
                     onClick={() => setExpandedMember(null)}
-                    disabled={isBusy}
+                    disabled={locked}
                     className="px-2 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-60"
                   >
                     Cancel
@@ -628,7 +651,8 @@ function MembersCard({
                     <button
                       type="button"
                       onClick={() => setExpandedMember(m.username)}
-                      className="text-xs text-ink-500 hover:text-ink-950"
+                      disabled={locked}
+                      className="text-xs text-ink-500 hover:text-ink-950 disabled:cursor-default disabled:opacity-50 disabled:hover:text-ink-500"
                     >
                       Change
                     </button>

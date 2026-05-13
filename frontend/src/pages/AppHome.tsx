@@ -35,15 +35,17 @@ export function AppHome() {
             </p>
           </Card>
         </Link>
-        <Card className="h-full p-6 opacity-60">
-          <p className="text-xs uppercase tracking-[0.18em] text-ink-500">
-            Soon
-          </p>
-          <h2 className="mt-2 text-lg font-medium">Friends</h2>
-          <p className="mt-2 text-sm text-ink-500">
-            Lands in milestone&nbsp;1.
-          </p>
-        </Card>
+        <Link to="/app/friends">
+          <Card className="h-full p-6 transition-colors hover:border-ink-400">
+            <p className="text-xs uppercase tracking-[0.18em] text-ink-500">
+              Connect
+            </p>
+            <h2 className="mt-2 text-lg font-medium">Friends</h2>
+            <p className="mt-2 text-sm text-ink-500">
+              Search people and manage your requests.
+            </p>
+          </Card>
+        </Link>
       </div>
     </div>
   );

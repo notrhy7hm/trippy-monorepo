@@ -28,6 +28,9 @@ export function AppShell() {
             <NavLink to="/app/trips" className={navLink}>
               Trips
             </NavLink>
+            <NavLink to="/app/friends" className={navLink}>
+              Friends
+            </NavLink>
             <NavLink to="/app/profile" className={navLink}>
               Profile
             </NavLink>

@@ -4,7 +4,7 @@ TRIPPY.ai is a collaborative trip planning platform for groups of friends.
 
 The idea is simple: create a trip, invite people, plan everything together, and later use a trip-scoped AI agent to help with planning, reminders, budgets, summaries, and other trip-related tasks.
 
-Current stage: **M0 / early foundation**.
+Current stage: **M1 / collaboration**.
 
 ---
 

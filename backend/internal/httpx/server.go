@@ -10,14 +10,16 @@ import (
 
 	"github.com/trippyai/trippy/backend/internal/api"
 	"github.com/trippyai/trippy/backend/internal/auth"
+	"github.com/trippyai/trippy/backend/internal/friends"
 	"github.com/trippyai/trippy/backend/internal/trips"
 	"github.com/trippyai/trippy/backend/internal/users"
 )
 
 type Deps struct {
-	Auth  *auth.Service
-	Users *users.Service
-	Trips *trips.Service
+	Auth    *auth.Service
+	Users   *users.Service
+	Friends *friends.Service
+	Trips   *trips.Service
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -54,16 +56,41 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/users/me", usersH.Me)
 			r.Patch("/users/me", usersH.UpdateMe)
 
+			// friends module also owns /users/search because the response
+			// is enriched with the viewer's relation to each result.
+			friendsH := friends.NewHandler(d.Friends)
+			r.Get("/users/search", friendsH.Search)
+			r.Get("/friends", friendsH.List)
+			r.Delete("/friends/{username}", friendsH.Remove)
+			r.Get("/friend-requests/incoming", friendsH.ListIncoming)
+			r.Get("/friend-requests/outgoing", friendsH.ListOutgoing)
+			r.Post("/friend-requests", friendsH.Send)
+			r.Post("/friend-requests/from/{username}/accept", friendsH.Accept)
+			r.Post("/friend-requests/from/{username}/decline", friendsH.Decline)
+			r.Delete("/friend-requests/to/{username}", friendsH.Cancel)
+
 			tripsH := trips.NewHandler(d.Trips)
 			r.Post("/trips", tripsH.Create)
 			r.Get("/trips", tripsH.ListMine)
 			r.Get("/trips/{tripSlug}", tripsH.Get)
 			r.Patch("/trips/{tripSlug}", tripsH.Update)
 			r.Delete("/trips/{tripSlug}", tripsH.Delete)
-
-			// M0 placeholder — M1 replaces with real invites
 			r.Get("/trips/{tripSlug}/members", tripsH.ListMembers)
-			r.Post("/trips/{tripSlug}/invites", tripsH.CreateInvitePlaceholder)
+			r.Patch("/trips/{tripSlug}/members/{username}/role", tripsH.UpdateMemberRole)
+			r.Patch("/trips/{tripSlug}/members/{username}/tags", tripsH.UpdateMemberTags)
+
+			// trip-scoped invites (owner/admin only at service layer)
+			r.Get("/trips/{tripSlug}/invites", tripsH.ListInvites)
+			r.Post("/trips/{tripSlug}/invites", tripsH.CreateInvite)
+			r.Delete("/trips/{tripSlug}/invites/{token}", tripsH.RevokeInvite)
+
+			// token-scoped invite actions (caller must be the invitee)
+			r.Get("/invites/{token}", tripsH.PreviewInvite)
+			r.Post("/invites/{token}/accept", tripsH.AcceptInvite)
+			r.Post("/invites/{token}/decline", tripsH.DeclineInvite)
+
+			// per-user view of pending invites
+			r.Get("/me/trip-invites", tripsH.ListMyInvites)
 		})
 	})
 

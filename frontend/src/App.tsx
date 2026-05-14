@@ -9,6 +9,7 @@ import { Profile } from "./pages/Profile";
 import { Trips } from "./pages/Trips";
 import { NewTrip } from "./pages/NewTrip";
 import { TripDashboard } from "./pages/TripDashboard";
+import { Friends } from "./pages/Friends";
 import { NotFound } from "./pages/NotFound";
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="trips" element={<Trips />} />
           <Route path="trips/new" element={<NewTrip />} />
           <Route path="trips/:tripSlug" element={<TripDashboard />} />
+          <Route path="friends" element={<Friends />} />
         </Route>
       </Route>
 

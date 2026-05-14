@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -12,8 +13,12 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("trip not found")
-	ErrSlugCollision = errors.New("slug already exists")
+	ErrNotFound         = errors.New("trip not found")
+	ErrSlugCollision    = errors.New("slug already exists")
+	ErrInviteExists     = errors.New("a pending invite already exists")
+	ErrInviteNotFound   = errors.New("trip invite not found")
+	ErrInviteNotPending = errors.New("trip invite is no longer pending")
+	ErrMemberNotFound   = errors.New("trip member not found")
 )
 
 type Repo struct{ db *sqlx.DB }
@@ -125,6 +130,314 @@ func (r *Repo) IsMember(ctx context.Context, tripID, userID uuid.UUID) (Role, bo
 		return "", false, err
 	}
 	return role, true, nil
+}
+
+// ---------------------------------------------------------------------------
+// trip_invites
+// ---------------------------------------------------------------------------
+
+// inviteRow is the joined shape used by all invite read queries: enough
+// context to build an Invite response without further round-trips.
+type inviteRow struct {
+	Token              string         `db:"token"`
+	Status             string         `db:"status"`
+	Role               string         `db:"role"`
+	InviteeUserID      *uuid.UUID     `db:"invitee_user_id"`
+	InviteeEmail       *string        `db:"invitee_email"`
+	InviteeUsername    sql.NullString `db:"invitee_username"`
+	InviteeDisplayName sql.NullString `db:"invitee_display_name"`
+	ByUsername         sql.NullString `db:"by_username"`
+	ByDisplayName      sql.NullString `db:"by_display_name"`
+	TripSlug           string         `db:"trip_slug"`
+	TripTitle          string         `db:"trip_title"`
+	ExpiresAt          time.Time      `db:"expires_at"`
+	CreatedAt          time.Time      `db:"created_at"`
+}
+
+const inviteSelectColumns = `
+	i.token, i.status, i.role,
+	i.invitee_user_id, i.invitee_email,
+	iu.username                                       AS invitee_username,
+	COALESCE(ip.display_name, iu.username)            AS invitee_display_name,
+	bu.username                                       AS by_username,
+	COALESCE(bp.display_name, bu.username)            AS by_display_name,
+	t.slug                                            AS trip_slug,
+	t.title                                           AS trip_title,
+	i.expires_at, i.created_at
+`
+
+const inviteJoins = `
+	FROM trip_invites i
+	JOIN trips t            ON t.id = i.trip_id AND t.deleted_at IS NULL
+	LEFT JOIN users iu      ON iu.id = i.invitee_user_id
+	LEFT JOIN user_profiles ip ON ip.user_id = iu.id
+	LEFT JOIN users bu      ON bu.id = i.invited_by_user_id
+	LEFT JOIN user_profiles bp ON bp.user_id = bu.id
+`
+
+// CreateInvite inserts a pending invite. Pg 23505 (partial unique idx on
+// pending (trip, user) / (trip, email)) is translated to ErrInviteExists.
+func (r *Repo) CreateInvite(ctx context.Context, in inviteInsertRow) (inviteRow, error) {
+	// Insert, then read back the joined row so the caller has the full
+	// shape ready for serialization.
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO trip_invites
+			(trip_id, invitee_user_id, invitee_email, token, status,
+			 expires_at, invited_by_user_id, role)
+		VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7)
+	`, in.TripID, in.InviteeUserID, in.InviteeEmail, in.Token,
+		in.ExpiresAt, in.InvitedByUserID, in.Role)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return inviteRow{}, ErrInviteExists
+		}
+		return inviteRow{}, err
+	}
+	return r.InviteByToken(ctx, in.Token)
+}
+
+// InviteByToken returns a single invite by token, in the joined row shape.
+func (r *Repo) InviteByToken(ctx context.Context, token string) (inviteRow, error) {
+	var row inviteRow
+	err := r.db.GetContext(ctx, &row, `
+		SELECT `+inviteSelectColumns+inviteJoins+`
+		WHERE i.token = $1
+	`, token)
+	if errors.Is(err, sql.ErrNoRows) {
+		return inviteRow{}, ErrInviteNotFound
+	}
+	return row, err
+}
+
+// ListTripInvites returns pending, unexpired invites for a trip.
+func (r *Repo) ListTripInvites(ctx context.Context, tripID uuid.UUID) ([]inviteRow, error) {
+	var rows []inviteRow
+	err := r.db.SelectContext(ctx, &rows, `
+		SELECT `+inviteSelectColumns+inviteJoins+`
+		WHERE i.trip_id = $1
+		  AND i.status = 'pending'
+		  AND i.expires_at > now()
+		ORDER BY i.created_at DESC
+	`, tripID)
+	return rows, err
+}
+
+// ListPendingForUser returns the viewer's pending, unexpired invites,
+// matched by invitee_user_id only. M1 does not surface email-only invites.
+func (r *Repo) ListPendingForUser(ctx context.Context, userID uuid.UUID) ([]inviteRow, error) {
+	var rows []inviteRow
+	err := r.db.SelectContext(ctx, &rows, `
+		SELECT `+inviteSelectColumns+inviteJoins+`
+		WHERE i.status = 'pending'
+		  AND i.expires_at > now()
+		  AND i.invitee_user_id = $1
+		ORDER BY i.created_at DESC
+	`, userID)
+	return rows, err
+}
+
+// RevokeInvite flips a pending invite to revoked.
+func (r *Repo) RevokeInvite(ctx context.Context, tripID uuid.UUID, token string) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE trip_invites
+		   SET status='revoked', responded_at=now()
+		 WHERE trip_id = $1 AND token = $2 AND status='pending'
+	`, tripID, token)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrInviteNotFound
+	}
+	return nil
+}
+
+// MarkExpiredByToken lazily expires a single pending row past its TTL.
+// It's safe to call before any read/accept/decline; rows in other states
+// are left alone.
+func (r *Repo) MarkExpiredByToken(ctx context.Context, token string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE trip_invites
+		   SET status='expired', responded_at=now()
+		 WHERE token = $1 AND status='pending' AND expires_at < now()
+	`, token)
+	return err
+}
+
+// DeclineInvite flips a pending, unexpired, caller-owned invite to declined.
+// All invariants are enforced in the UPDATE predicate so the mutation is
+// safe even if a pre-check raced.
+func (r *Repo) DeclineInvite(ctx context.Context, token string, userID uuid.UUID) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE trip_invites
+		   SET status='declined', responded_at=now()
+		 WHERE token = $1
+		   AND status = 'pending'
+		   AND expires_at > now()
+		   AND invitee_user_id = $2
+	`, token, userID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrInviteNotPending
+	}
+	return nil
+}
+
+// AcceptInvite atomically flips a pending invite to accepted and inserts the
+// membership row using the invite's stored role. The transaction enforces
+// every invariant directly:
+//
+//  1. SELECT FOR UPDATE locks the invite row and requires
+//     status='pending', expires_at > now(), invitee_user_id = caller.
+//     0 rows -> ErrInviteNotPending (covers not-found, expired,
+//     not-yours, and already-acted-on cases).
+//  2. EXISTS membership check inside the same transaction. If the caller
+//     is already a member, the invite is *not* marked accepted and
+//     ErrAlreadyMember is returned.
+//  3. INSERT membership without ON CONFLICT — a PK violation here would
+//     indicate a race that step 2 missed; it is mapped to ErrAlreadyMember
+//     rather than silently swallowed.
+func (r *Repo) AcceptInvite(ctx context.Context, token string, userID uuid.UUID) (Trip, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return Trip{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var tripID uuid.UUID
+	var role Role
+	err = tx.QueryRowxContext(ctx, `
+		SELECT trip_id, role
+		FROM trip_invites
+		WHERE token = $1
+		  AND status = 'pending'
+		  AND expires_at > now()
+		  AND invitee_user_id = $2
+		FOR UPDATE
+	`, token, userID).Scan(&tripID, &role)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Trip{}, ErrInviteNotPending
+		}
+		return Trip{}, err
+	}
+
+	var alreadyMember bool
+	if err := tx.GetContext(ctx, &alreadyMember, `
+		SELECT EXISTS(
+			SELECT 1 FROM trip_members WHERE trip_id = $1 AND user_id = $2
+		)
+	`, tripID, userID); err != nil {
+		return Trip{}, err
+	}
+	if alreadyMember {
+		return Trip{}, ErrAlreadyMember
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE trip_invites
+		   SET status='accepted', responded_at=now()
+		 WHERE token = $1
+	`, token); err != nil {
+		return Trip{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO trip_members (trip_id, user_id, role, tags)
+		VALUES ($1, $2, $3, ARRAY[]::text[])
+	`, tripID, userID, role); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return Trip{}, ErrAlreadyMember
+		}
+		return Trip{}, err
+	}
+
+	var trip Trip
+	if err := tx.GetContext(ctx, &trip, `
+		SELECT `+tripColumns+`
+		FROM trips
+		WHERE id = $1 AND deleted_at IS NULL
+	`, tripID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Trip{}, ErrNotFound
+		}
+		return Trip{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Trip{}, err
+	}
+	return trip, nil
+}
+
+// UpdateMemberTags replaces the tags array of an existing trip_members row
+// and returns the updated Member shape. Tags are written as a text[] via
+// pq.Array; an empty slice clears the column to ARRAY[]::text[]. Returns
+// ErrMemberNotFound when no row matches (trip × user).
+func (r *Repo) UpdateMemberTags(ctx context.Context, tripID, userID uuid.UUID, tags []string) (Member, error) {
+	var m Member
+	var dbTags pq.StringArray
+	err := r.db.QueryRowxContext(ctx, `
+		WITH upd AS (
+			UPDATE trip_members SET tags = $3
+			WHERE trip_id = $1 AND user_id = $2
+			RETURNING user_id, role, tags
+		)
+		SELECT upd.user_id,
+		       u.username,
+		       COALESCE(p.display_name, u.username) AS display_name,
+		       upd.role,
+		       upd.tags
+		FROM upd
+		JOIN users u ON u.id = upd.user_id
+		LEFT JOIN user_profiles p ON p.user_id = u.id
+	`, tripID, userID, pq.Array(tags)).Scan(&m.UserID, &m.Username, &m.DisplayName, &m.Role, &dbTags)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Member{}, ErrMemberNotFound
+	}
+	if err != nil {
+		return Member{}, err
+	}
+	m.Tags = []string(dbTags)
+	return m, nil
+}
+
+// UpdateMemberRole flips the role of an existing trip_members row and
+// returns the updated Member shape (joined with users + user_profiles so
+// the caller gets the public-facing fields, not just UUIDs). Returns
+// ErrMemberNotFound when no row matches (trip × user).
+func (r *Repo) UpdateMemberRole(ctx context.Context, tripID, userID uuid.UUID, role Role) (Member, error) {
+	var m Member
+	var tags pq.StringArray
+	err := r.db.QueryRowxContext(ctx, `
+		WITH upd AS (
+			UPDATE trip_members SET role = $3
+			WHERE trip_id = $1 AND user_id = $2
+			RETURNING user_id, role, tags
+		)
+		SELECT upd.user_id,
+		       u.username,
+		       COALESCE(p.display_name, u.username) AS display_name,
+		       upd.role,
+		       upd.tags
+		FROM upd
+		JOIN users u ON u.id = upd.user_id
+		LEFT JOIN user_profiles p ON p.user_id = u.id
+	`, tripID, userID, role).Scan(&m.UserID, &m.Username, &m.DisplayName, &m.Role, &tags)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Member{}, ErrMemberNotFound
+	}
+	if err != nil {
+		return Member{}, err
+	}
+	m.Tags = []string(tags)
+	return m, nil
 }
 
 func (r *Repo) ListMembers(ctx context.Context, tripID uuid.UUID) ([]Member, error) {

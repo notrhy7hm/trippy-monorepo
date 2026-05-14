@@ -67,6 +67,20 @@ func (r *Repo) ByID(ctx context.Context, id uuid.UUID) (User, error) {
 	return u, err
 }
 
+func (r *Repo) ByEmail(ctx context.Context, email string) (User, error) {
+	var u User
+	err := r.db.GetContext(ctx, &u, `
+		SELECT `+userColumns+`
+		FROM users u
+		LEFT JOIN user_profiles p ON p.user_id = u.id
+		WHERE u.email = $1 AND u.deleted_at IS NULL
+	`, email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	return u, err
+}
+
 func (r *Repo) ByUsername(ctx context.Context, username string) (User, error) {
 	var u User
 	err := r.db.GetContext(ctx, &u, `
@@ -98,6 +112,47 @@ func (r *Repo) FindForLogin(ctx context.Context, identifier string) (User, strin
 		return User{}, "", err
 	}
 	return u, hash, nil
+}
+
+// Search returns up to `limit` users whose username or display name match q
+// (ILIKE, case-insensitive). Soft-deleted users are excluded. The viewer is
+// not filtered out at this layer; callers may include the viewer themself
+// (the friends module marks them with relation="self" in search results).
+func (r *Repo) Search(ctx context.Context, q string, limit int) ([]PublicUser, error) {
+	esc := escapeLike(q)
+	pattern := "%" + esc + "%"
+	prefix := esc + "%"
+	var out []PublicUser
+	err := r.db.SelectContext(ctx, &out, `
+		SELECT u.id,
+		       u.username,
+		       COALESCE(p.display_name, u.username) AS display_name,
+		       COALESCE(p.avatar_url, '')           AS avatar_url
+		FROM users u
+		LEFT JOIN user_profiles p ON p.user_id = u.id
+		WHERE u.deleted_at IS NULL
+		  AND (u.username ILIKE $1
+		       OR COALESCE(p.display_name, '') ILIKE $1)
+		ORDER BY (lower(u.username) = lower($2)) DESC,
+		         (u.username ILIKE $3)           DESC,
+		         u.username ASC
+		LIMIT $4
+	`, pattern, q, prefix, limit)
+	return out, err
+}
+
+// escapeLike escapes the three LIKE metacharacters so that user-supplied
+// search terms are treated as literals.
+func escapeLike(s string) string {
+	r := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' || c == '%' || c == '_' {
+			r = append(r, '\\')
+		}
+		r = append(r, c)
+	}
+	return string(r)
 }
 
 func (r *Repo) UpdateProfile(ctx context.Context, id uuid.UUID, in UpdateInput) (User, error) {

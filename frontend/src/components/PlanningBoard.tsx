@@ -54,14 +54,25 @@ export function PlanningBoard({
   tripSlug,
   members,
   viewerIsMember,
+  reloadTrip,
 }: {
   tripSlug: string | undefined;
   members: BoardMember[];
   viewerIsMember: boolean;
+  // reloadTrip refreshes the parent dashboard's trip + members. We call
+  // it when a task action returns 403/404 so viewerIsMember can re-derive
+  // from the server's view of membership.
+  reloadTrip: () => Promise<void>;
 }) {
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // accessLost flips on when a task action returns 403/404, hiding every
+  // task control until either the parent reload says we're no longer a
+  // member (the existing non-member empty state takes over) or a follow-up
+  // GET succeeds (transient — recover and clear).
+  const [accessLost, setAccessLost] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -104,6 +115,7 @@ export function PlanningBoard({
     setTasks(null);
     setLoadError(null);
     setActionError(null);
+    setAccessLost(false);
     setShowForm(false);
     setForm(emptyForm);
     setFormError(null);
@@ -122,13 +134,20 @@ export function PlanningBoard({
       for (const t of tasks) {
         out[t.status].push(t);
       }
+      // Re-sort every bucket on the client so a PATCH that rebuckets a
+      // task (backend assigns a new position at the end of the new
+      // column) always renders in the correct order, even though we
+      // splice the response in place instead of refetching.
+      for (const s of STATUSES) {
+        out[s].sort(compareTasks);
+      }
     }
     return out;
   }, [tasks]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    if (creating) return;
+    if (creating || accessLost) return;
 
     const title = form.title.trim();
     if (title === "") {
@@ -157,11 +176,47 @@ export function PlanningBoard({
       setShowForm(false);
     } catch (err) {
       if (gen !== genRef.current) return;
-      setFormError(err instanceof ApiError ? err.message : "Create failed");
+      if (
+        err instanceof ApiError &&
+        (err.status === 403 || err.status === 404)
+      ) {
+        setShowForm(false);
+        await handleAccessError(gen, err.message);
+      } else {
+        setFormError(err instanceof ApiError ? err.message : "Create failed");
+      }
     } finally {
       if (gen === genRef.current) setCreating(false);
     }
   }
+
+  // handleAccessError centralizes the 403/404 path used by both PATCH
+  // and DELETE. It hides task controls locally, asks the parent to
+  // refetch trip + members (so viewerIsMember can re-derive), then
+  // attempts a single follow-up GET. If the GET succeeds, the error was
+  // transient and we recover; if it fails again, accessLost stays true
+  // and controls remain hidden until the user navigates.
+  const handleAccessError = useCallback(
+    async (gen: number, message: string) => {
+      if (gen !== genRef.current) return;
+      setActionError(message);
+      setAccessLost(true);
+      await reloadTrip();
+      if (gen !== genRef.current || !tripSlug) return;
+      try {
+        const xs = await api<Task[]>("GET", `/trips/${tripSlug}/tasks`);
+        if (gen !== genRef.current) return;
+        setTasks(xs);
+        setAccessLost(false);
+        setActionError(null);
+        setLoadError(null);
+      } catch {
+        // Still no access — leave accessLost true. If viewerIsMember
+        // flipped to false, the reset effect already cleared state.
+      }
+    },
+    [reloadTrip, tripSlug],
+  );
 
   async function onChangeStatus(task: Task, next: Status) {
     if (busyTaskId !== null || next === task.status || !tripSlug) return;
@@ -180,14 +235,15 @@ export function PlanningBoard({
       );
     } catch (err) {
       if (gen !== genRef.current) return;
-      setActionError(
-        err instanceof ApiError ? err.message : "Update failed",
-      );
       if (
         err instanceof ApiError &&
         (err.status === 403 || err.status === 404)
       ) {
-        await refresh();
+        await handleAccessError(gen, err.message);
+      } else {
+        setActionError(
+          err instanceof ApiError ? err.message : "Update failed",
+        );
       }
     } finally {
       if (gen === genRef.current) setBusyTaskId(null);
@@ -209,14 +265,15 @@ export function PlanningBoard({
       setTasks((prev) => (prev ? prev.filter((x) => x.id !== task.id) : prev));
     } catch (err) {
       if (gen !== genRef.current) return;
-      setActionError(
-        err instanceof ApiError ? err.message : "Delete failed",
-      );
       if (
         err instanceof ApiError &&
         (err.status === 403 || err.status === 404)
       ) {
-        await refresh();
+        await handleAccessError(gen, err.message);
+      } else {
+        setActionError(
+          err instanceof ApiError ? err.message : "Delete failed",
+        );
       }
     } finally {
       if (gen === genRef.current) setBusyTaskId(null);
@@ -233,7 +290,7 @@ export function PlanningBoard({
             trip.
           </p>
         </div>
-        {viewerIsMember && (
+        {viewerIsMember && !accessLost && (
           <Button
             variant={showForm ? "ghost" : "primary"}
             onClick={() => {
@@ -251,6 +308,16 @@ export function PlanningBoard({
           <p className="text-sm text-ink-500">
             Only trip members can see and manage planning tasks.
           </p>
+        </Card>
+      ) : accessLost ? (
+        <Card className="mt-4 p-6 text-center">
+          <p className="text-sm text-ink-500">
+            You no longer have access to manage planning tasks for this
+            trip.
+          </p>
+          {actionError && (
+            <p className="mt-2 text-xs text-ink-400">{actionError}</p>
+          )}
         </Card>
       ) : (
         <>
@@ -460,9 +527,7 @@ function TaskCard({
             @<span className="font-medium">{task.assignee.username}</span>
           </span>
         )}
-        {task.dueDate && (
-          <span>Due {new Date(task.dueDate).toLocaleDateString()}</span>
-        )}
+        {task.dueDate && <span>Due {formatDueDate(task.dueDate)}</span>}
         <span className="text-ink-400">
           by @{task.createdBy.username}
         </span>
@@ -526,4 +591,24 @@ function prettyStatus(s: Status) {
 
 function prettyPriority(p: Priority) {
   return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
+// compareTasks reproduces the backend's deterministic order so a single
+// bucket renders the same way the server would return it: position asc,
+// createdAt asc, id asc. RFC3339 strings compare correctly lexically, so
+// no Date math is needed.
+function compareTasks(a: Task, b: Task): number {
+  if (a.position !== b.position) return a.position - b.position;
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+  if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+  return 0;
+}
+
+// formatDueDate formats a Postgres date column (returned by the API as
+// an RFC3339 timestamp at midnight UTC) without going through Date,
+// which would otherwise shift the displayed day for users in negative
+// timezones. We keep only the YYYY-MM-DD prefix.
+function formatDueDate(raw: string): string {
+  const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : raw;
 }

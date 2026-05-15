@@ -485,6 +485,7 @@ export function TripDashboard() {
         tripSlug={tripSlug}
         members={members}
         viewerIsMember={!!myMember}
+        reloadTrip={reloadTrip}
       />
 
       <div className="mt-10 grid gap-4 md:grid-cols-2">

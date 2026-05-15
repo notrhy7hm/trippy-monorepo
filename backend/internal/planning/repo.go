@@ -144,14 +144,41 @@ type CreateRow struct {
 	DueDate         *time.Time
 }
 
+// lockBucketSQL takes a Postgres transaction-scoped advisory lock keyed
+// by (trip_id, status). hashtextextended produces a stable bigint hash so
+// the same bucket maps to the same lock key across connections. The lock
+// is released automatically on tx commit/rollback.
+const lockBucketSQL = `
+	SELECT pg_advisory_xact_lock(
+		hashtextextended('trip_tasks_pos:' || $1::text || ':' || $2::text, 0)
+	)
+`
+
+func lockTaskPositionBucket(ctx context.Context, tx *sqlx.Tx, tripID uuid.UUID, status Status) error {
+	_, err := tx.ExecContext(ctx, lockBucketSQL, tripID, status)
+	return err
+}
+
+func nextPositionInBucket(ctx context.Context, tx *sqlx.Tx, tripID uuid.UUID, status Status) (int, error) {
+	var maxPos sql.NullInt64
+	if err := tx.GetContext(ctx, &maxPos, `
+		SELECT MAX(position) FROM trip_tasks
+		WHERE trip_id = $1 AND status = $2
+	`, tripID, status); err != nil {
+		return 0, err
+	}
+	if maxPos.Valid {
+		return int(maxPos.Int64) + 1000, nil
+	}
+	return 1000, nil
+}
+
 // CreateTask inserts a new task and returns it joined.
 //
-// The next position is computed inside the same transaction as the insert
-// so two parallel POSTs on the same (trip, status) bucket cannot tie at
-// the same position. Postgres serializes the table access at MAX(...) +
-// INSERT under the default isolation level for our row counts, which is
-// fine for M2; if contention ever becomes real we'd switch to a sequence
-// per bucket.
+// Position assignment is concurrency-safe: the tx takes a per-bucket
+// advisory lock before reading MAX(position), so two parallel CreateTask
+// calls in the same (trip, status) bucket cannot read the same max and
+// insert the same position. Tasks in different buckets do not contend.
 func (r *Repo) CreateTask(ctx context.Context, in CreateRow) (Task, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -159,16 +186,12 @@ func (r *Repo) CreateTask(ctx context.Context, in CreateRow) (Task, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var maxPos sql.NullInt64
-	if err := tx.GetContext(ctx, &maxPos, `
-		SELECT MAX(position) FROM trip_tasks
-		WHERE trip_id = $1 AND status = $2
-	`, in.TripID, in.Status); err != nil {
+	if err := lockTaskPositionBucket(ctx, tx, in.TripID, in.Status); err != nil {
 		return Task{}, err
 	}
-	nextPos := 1000
-	if maxPos.Valid {
-		nextPos = int(maxPos.Int64) + 1000
+	nextPos, err := nextPositionInBucket(ctx, tx, in.TripID, in.Status)
+	if err != nil {
+		return Task{}, err
 	}
 
 	var id uuid.UUID
@@ -220,9 +243,55 @@ type UpdateRow struct {
 	DueDate    *time.Time
 }
 
-// UpdateTask applies a partial update inside a single SQL statement.
-// updated_at is always bumped. Returns the joined Task.
+// UpdateTask applies a partial update inside a single transaction.
+//
+//  1. SELECT FOR UPDATE locks the task row, reading its current status.
+//     Missing row -> ErrTaskNotFound.
+//  2. If the request changes status AND does not include an explicit
+//     position, the task is rebucketed: a per-bucket advisory lock is
+//     taken on the new (trip, status) bucket and position is set to
+//     max(position) + 1000 within that bucket. The same lock that
+//     serializes CreateTask serializes rebucketing, so two concurrent
+//     moves into the same bucket cannot tie.
+//  3. Dynamic UPDATE applies all set fields; updated_at = now() is
+//     always written.
+//  4. Joined Task is re-read inside the tx and returned.
 func (r *Repo) UpdateTask(ctx context.Context, tripID, taskID uuid.UUID, in UpdateRow) (Task, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return Task{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var currentStatus Status
+	err = tx.QueryRowxContext(ctx, `
+		SELECT status FROM trip_tasks
+		WHERE trip_id = $1 AND id = $2
+		FOR UPDATE
+	`, tripID, taskID).Scan(&currentStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Task{}, ErrTaskNotFound
+	}
+	if err != nil {
+		return Task{}, err
+	}
+
+	// Decide whether to rebucket. Only fires when status changes *and*
+	// the caller did not pin a position themselves.
+	var rebucketedPos *int
+	if in.Status != nil && *in.Status != currentStatus && in.Position == nil {
+		if err := lockTaskPositionBucket(ctx, tx, tripID, *in.Status); err != nil {
+			return Task{}, err
+		}
+		// The row is still in its old status bucket at this point, so the
+		// MAX(position) for the new bucket already excludes it correctly.
+		np, err := nextPositionInBucket(ctx, tx, tripID, *in.Status)
+		if err != nil {
+			return Task{}, err
+		}
+		rebucketedPos = &np
+	}
+
 	// Build SET clause dynamically. trip_id ($1) + task_id ($2) are
 	// always the first two args; everything else follows.
 	parts := []string{"updated_at = now()"}
@@ -246,8 +315,11 @@ func (r *Repo) UpdateTask(ctx context.Context, tripID, taskID uuid.UUID, in Upda
 	if in.Priority != nil {
 		add("priority", *in.Priority)
 	}
-	if in.Position != nil {
+	switch {
+	case in.Position != nil:
 		add("position", *in.Position)
+	case rebucketedPos != nil:
+		add("position", *rebucketedPos)
 	}
 	if in.SetAssignee {
 		// AssigneeUserID is *uuid.UUID, which scans as NULL when nil.
@@ -262,7 +334,7 @@ func (r *Repo) UpdateTask(ctx context.Context, tripID, taskID uuid.UUID, in Upda
 		WHERE trip_id = $1 AND id = $2
 	`, strings.Join(parts, ", "))
 
-	res, err := r.db.ExecContext(ctx, query, args...)
+	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return Task{}, err
 	}
@@ -270,7 +342,19 @@ func (r *Repo) UpdateTask(ctx context.Context, tripID, taskID uuid.UUID, in Upda
 	if n == 0 {
 		return Task{}, ErrTaskNotFound
 	}
-	return r.TaskByIDForTrip(ctx, tripID, taskID)
+
+	var row taskRow
+	if err := tx.GetContext(ctx, &row, `
+		SELECT `+taskSelectColumns+taskJoins+`
+		WHERE t.trip_id = $1 AND t.id = $2
+	`, tripID, taskID); err != nil {
+		return Task{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Task{}, err
+	}
+	return rowToTask(row), nil
 }
 
 // DeleteTask hard-deletes a single task scoped to its trip.

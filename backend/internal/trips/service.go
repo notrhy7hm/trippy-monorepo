@@ -69,6 +69,34 @@ func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput)
 	return Trip{}, errors.New("could not allocate slug")
 }
 
+// AssertMember returns the trip's UUID if userID is a member of the trip
+// addressed by slug. ErrNotFound when the trip is gone, ErrForbidden when
+// the caller is not a member. Used by sibling packages (e.g. planning) that
+// need a one-shot slug -> tripID + membership check without importing the
+// repo directly.
+func (s *Service) AssertMember(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, error) {
+	trip, err := s.repo.BySlug(ctx, slug)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	_, ok, err := s.repo.IsMember(ctx, trip.ID, userID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if !ok {
+		return uuid.Nil, ErrForbidden
+	}
+	return trip.ID, nil
+}
+
+// IsTripMember reports whether userID is a member of tripID. Sibling
+// packages use this to validate assignees / participants without going
+// through the slug lookup again.
+func (s *Service) IsTripMember(ctx context.Context, tripID, userID uuid.UUID) (bool, error) {
+	_, ok, err := s.repo.IsMember(ctx, tripID, userID)
+	return ok, err
+}
+
 func (s *Service) BySlugForUser(ctx context.Context, slug string, userID uuid.UUID) (Trip, error) {
 	t, err := s.repo.BySlug(ctx, slug)
 	if err != nil {

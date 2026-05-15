@@ -11,15 +11,17 @@ import (
 	"github.com/trippyai/trippy/backend/internal/api"
 	"github.com/trippyai/trippy/backend/internal/auth"
 	"github.com/trippyai/trippy/backend/internal/friends"
+	"github.com/trippyai/trippy/backend/internal/planning"
 	"github.com/trippyai/trippy/backend/internal/trips"
 	"github.com/trippyai/trippy/backend/internal/users"
 )
 
 type Deps struct {
-	Auth    *auth.Service
-	Users   *users.Service
-	Friends *friends.Service
-	Trips   *trips.Service
+	Auth     *auth.Service
+	Users    *users.Service
+	Friends  *friends.Service
+	Trips    *trips.Service
+	Planning *planning.Service
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -91,6 +93,13 @@ func NewRouter(d Deps) http.Handler {
 
 			// per-user view of pending invites
 			r.Get("/me/trip-invites", tripsH.ListMyInvites)
+
+			// M2 — planning tasks (any trip member may CRUD)
+			planningH := planning.NewHandler(d.Planning)
+			r.Get("/trips/{tripSlug}/tasks", planningH.List)
+			r.Post("/trips/{tripSlug}/tasks", planningH.Create)
+			r.Patch("/trips/{tripSlug}/tasks/{taskID}", planningH.Update)
+			r.Delete("/trips/{tripSlug}/tasks/{taskID}", planningH.Delete)
 		})
 	})
 

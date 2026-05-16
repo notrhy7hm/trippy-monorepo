@@ -29,8 +29,11 @@ func (h *Handler) ListItinerary(w http.ResponseWriter, r *http.Request) {
 // ---- create ---------------------------------------------------------------
 
 type createItineraryReq struct {
-	// dayIndex is required, so use a pointer to distinguish "absent"
-	// from a legitimate 0.
+	// dayIndex is optional on create; missing / null defaults to 0.
+	// Pointer (not value) so we can distinguish "absent" from a literal
+	// 0 — only "absent" gets the default. PATCH continues to treat a
+	// nil pointer as "no change" so the same shape works for both
+	// requests.
 	DayIndex     *int   `json:"dayIndex"`
 	Date         string `json:"date"`
 	Title        string `json:"title"`
@@ -46,13 +49,14 @@ func (h *Handler) CreateItinerary(w http.ResponseWriter, r *http.Request) {
 		api.Err(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	if in.DayIndex == nil {
-		writeError(w, ErrInvalidDayIndex)
-		return
+
+	dayIndex := 0
+	if in.DayIndex != nil {
+		dayIndex = *in.DayIndex
 	}
 
 	create := ItineraryCreateInput{
-		DayIndex: *in.DayIndex,
+		DayIndex: dayIndex,
 		Title:    in.Title,
 		Notes:    in.Notes,
 	}

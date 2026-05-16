@@ -147,9 +147,18 @@ func (r *ItineraryRepo) ItineraryItemByIDForTrip(ctx context.Context, tripID, it
 // (trip_id, day_index). hashtextextended is stable across connections, so
 // the same bucket maps to the same lock key everywhere. Released
 // automatically on commit/rollback. Different buckets do not contend.
+//
+// The $2::int::text dance matters: pgx infers the parameter type from
+// the *first* cast it sees. A bare $2::text would tell pgx to encode
+// the Go int as Postgres text and fail with
+//
+//	"unable to encode 1 into text format for text (OID 25)".
+//
+// $2::int::text tells pgx the parameter is integer (correct for the
+// Go int), and the SQL then casts it to text after binding.
 const lockItineraryBucketSQL = `
 	SELECT pg_advisory_xact_lock(
-		hashtextextended('trip_itinerary_pos:' || $1::text || ':' || $2::text, 0)
+		hashtextextended('trip_itinerary_pos:' || $1::text || ':' || $2::int::text, 0)
 	)
 `
 

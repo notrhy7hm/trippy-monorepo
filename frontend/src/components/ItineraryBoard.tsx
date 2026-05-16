@@ -46,7 +46,7 @@ type FormState = {
 };
 
 const emptyForm: FormState = {
-  dayIndex: "0",
+  dayIndex: "",
   date: "",
   title: "",
   notes: "",
@@ -59,6 +59,8 @@ export function ItineraryBoard({
   tripSlug,
   viewerIsMember,
   reloadTrip,
+  tripStartsOn,
+  tripEndsOn,
 }: {
   tripSlug: string | undefined;
   // Members is currently unused by this section (no assignee), but kept
@@ -67,7 +69,15 @@ export function ItineraryBoard({
   members: ItineraryMember[];
   viewerIsMember: boolean;
   reloadTrip: () => Promise<void>;
+  // Trip date bounds (from the Trip model on the dashboard). Either may
+  // be undefined when the trip is still in relative-day mode. When both
+  // are set, the form auto-syncs day <-> date and the validator
+  // enforces the trip range.
+  tripStartsOn?: string;
+  tripEndsOn?: string;
 }) {
+  const tripStartDate = tripStartsOn ? formatDateDisplay(tripStartsOn) : undefined;
+  const tripEndDate = tripEndsOn ? formatDateDisplay(tripEndsOn) : undefined;
   const [items, setItems] = useState<ItineraryItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -177,7 +187,7 @@ export function ItineraryBoard({
     e.preventDefault();
     if (creating || accessLost || !tripSlug) return;
 
-    const validated = validateForm(createForm);
+    const validated = validateForm(createForm, "create", tripStartDate, tripEndDate);
     if (!validated.ok) {
       setCreateError(validated.error);
       return;
@@ -240,7 +250,7 @@ export function ItineraryBoard({
     if (busyItemId !== null || accessLost || !tripSlug || !editingItemId) {
       return;
     }
-    const validated = validateForm(editForm);
+    const validated = validateForm(editForm, "edit", tripStartDate, tripEndDate);
     if (!validated.ok) {
       setEditError(validated.error);
       return;
@@ -251,9 +261,9 @@ export function ItineraryBoard({
     setEditError(null);
     try {
       // Send full set of editable fields; "" clears nullable columns,
-      // matching the backend's PATCH semantics.
-      const body = {
-        dayIndex: validated.values.dayIndex,
+      // matching the backend's PATCH semantics. validate-edit guarantees
+      // dayIndex is defined.
+      const body: Record<string, unknown> = {
         title: validated.values.title,
         notes: editForm.notes,
         locationName: editForm.locationName.trim(),
@@ -261,6 +271,9 @@ export function ItineraryBoard({
         startsAt: editForm.startsAt,
         endsAt: editForm.endsAt,
       };
+      if (validated.values.dayIndex !== undefined) {
+        body.dayIndex = validated.values.dayIndex;
+      }
       const updated = await api<ItineraryItem>(
         "PATCH",
         `/trips/${tripSlug}/itinerary/${encodeURIComponent(editingItemId)}`,
@@ -373,6 +386,8 @@ export function ItineraryBoard({
                 submitLabel={creating ? "Adding…" : "Add item"}
                 onSubmit={onCreate}
                 onCancel={closeCreate}
+                tripStartDate={tripStartDate}
+                tripEndDate={tripEndDate}
               />
             </Card>
           )}
@@ -410,6 +425,8 @@ export function ItineraryBoard({
                   onCancelEdit={closeEdit}
                   onSaveEdit={onSaveEdit}
                   onDelete={onDelete}
+                  tripStartDate={tripStartDate}
+                  tripEndDate={tripEndDate}
                 />
               ))}
             </div>
@@ -441,6 +458,8 @@ function DayGroup({
   onCancelEdit,
   onSaveEdit,
   onDelete,
+  tripStartDate,
+  tripEndDate,
 }: {
   group: DayBucket;
   editingItemId: string | null;
@@ -452,6 +471,8 @@ function DayGroup({
   onCancelEdit: () => void;
   onSaveEdit: (e: FormEvent) => void;
   onDelete: (item: ItineraryItem) => void;
+  tripStartDate?: string;
+  tripEndDate?: string;
 }) {
   return (
     <div>
@@ -475,6 +496,8 @@ function DayGroup({
                 submitLabel={locked ? "Saving…" : "Save"}
                 onSubmit={onSaveEdit}
                 onCancel={onCancelEdit}
+                tripStartDate={tripStartDate}
+                tripEndDate={tripEndDate}
               />
             </Card>
           ) : (
@@ -555,6 +578,8 @@ function ItineraryFormFields({
   submitLabel,
   onSubmit,
   onCancel,
+  tripStartDate,
+  tripEndDate,
 }: {
   form: FormState;
   setForm: (next: FormState) => void;
@@ -563,10 +588,36 @@ function ItineraryFormFields({
   submitLabel: string;
   onSubmit: (e: FormEvent) => void;
   onCancel: () => void;
+  tripStartDate?: string;
+  tripEndDate?: string;
 }) {
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm({ ...form, [key]: value });
   }
+
+  // Day/date sync: when the trip has a start date, changing one input
+  // auto-fills the other. Sync is one-way per edit — clearing either
+  // input never clears the other.
+  function onDayChange(v: string) {
+    const next: FormState = { ...form, dayIndex: v };
+    if (tripStartDate) {
+      const trimmed = v.trim();
+      if (trimmed !== "" && /^\d+$/.test(trimmed)) {
+        const n = parseInt(trimmed, 10);
+        if (n >= 0) next.date = addDaysUTC(tripStartDate, n);
+      }
+    }
+    setForm(next);
+  }
+  function onDateChange(v: string) {
+    const next: FormState = { ...form, date: v };
+    if (tripStartDate && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      const d = diffDaysUTC(v, tripStartDate);
+      if (d >= 0) next.dayIndex = String(d);
+    }
+    setForm(next);
+  }
+
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div>
@@ -604,16 +655,18 @@ function ItineraryFormFields({
             type="number"
             min={0}
             value={form.dayIndex}
-            onChange={(e) => set("dayIndex", e.target.value)}
-            required
+            onChange={(e) => onDayChange(e.target.value)}
+            placeholder="Optional"
           />
         </Field>
         <Field label="Date">
           <input
             type="date"
             value={form.date}
+            min={tripStartDate}
+            max={tripEndDate}
             onChange={(e: ChangeEvent<HTMLInputElement>) =>
-              set("date", e.target.value)
+              onDateChange(e.target.value)
             }
             className={controlClass}
           />
@@ -676,22 +729,38 @@ const controlClass =
 // ---------------------------------------------------------------------------
 
 type ValidatedForm =
-  | { ok: true; values: { dayIndex: number; title: string } }
+  | { ok: true; values: { dayIndex?: number; title: string } }
   | { ok: false; error: string };
 
-function validateForm(form: FormState): ValidatedForm {
-  const dayStr = form.dayIndex.trim();
-  if (!/^\d+$/.test(dayStr)) {
-    return { ok: false, error: "Day must be a non-negative integer." };
-  }
-  const dayIndex = parseInt(dayStr, 10);
-  if (Number.isNaN(dayIndex) || dayIndex < 0) {
-    return { ok: false, error: "Day must be a non-negative integer." };
-  }
-
+// validateForm runs all the front-end shape and range checks. dayIndex
+// is optional in create mode (the backend defaults missing values to 0)
+// and required in edit mode (every existing item carries one).
+function validateForm(
+  form: FormState,
+  mode: "create" | "edit",
+  tripStartDate?: string,
+  tripEndDate?: string,
+): ValidatedForm {
   const title = form.title.trim();
   if (title === "") {
     return { ok: false, error: "Title is required." };
+  }
+
+  let dayIndex: number | undefined;
+  const dayStr = form.dayIndex.trim();
+  if (dayStr === "") {
+    if (mode === "edit") {
+      return { ok: false, error: "Day is required." };
+    }
+  } else {
+    if (!/^\d+$/.test(dayStr)) {
+      return { ok: false, error: "Day must be a non-negative integer." };
+    }
+    const n = parseInt(dayStr, 10);
+    if (Number.isNaN(n) || n < 0) {
+      return { ok: false, error: "Day must be a non-negative integer." };
+    }
+    dayIndex = n;
   }
 
   if (form.date !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(form.date)) {
@@ -712,6 +781,27 @@ function validateForm(form: FormState): ValidatedForm {
     }
   }
 
+  // Trip-range checks only run when both ends of the range are known.
+  if (tripStartDate && tripEndDate) {
+    if (form.date !== "") {
+      if (form.date < tripStartDate || form.date > tripEndDate) {
+        return {
+          ok: false,
+          error: `Date must be between ${tripStartDate} and ${tripEndDate}.`,
+        };
+      }
+    }
+    if (dayIndex !== undefined) {
+      const tripDays = diffDaysUTC(tripEndDate, tripStartDate) + 1;
+      if (dayIndex >= tripDays) {
+        return {
+          ok: false,
+          error: `Day ${dayIndex} is outside the trip range (0–${tripDays - 1}).`,
+        };
+      }
+    }
+  }
+
   return { ok: true, values: { dayIndex, title } };
 }
 
@@ -720,14 +810,14 @@ function isValidTimeInput(s: string): boolean {
 }
 
 function buildCreateBody(
-  values: { dayIndex: number; title: string },
+  values: { dayIndex?: number; title: string },
   form: FormState,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    dayIndex: values.dayIndex,
     title: values.title,
     notes: form.notes,
   };
+  if (values.dayIndex !== undefined) body.dayIndex = values.dayIndex;
   if (form.locationName.trim() !== "") {
     body.locationName = form.locationName.trim();
   }
@@ -799,6 +889,37 @@ function formatDateInput(raw: string): string {
 // formatTimeInput shortens HH:MM:SS -> HH:MM for <input type="time">.
 function formatTimeInput(raw: string): string {
   return raw.length >= 5 ? raw.slice(0, 5) : raw;
+}
+
+// addDaysUTC / diffDaysUTC do date-only arithmetic via Date.UTC so the
+// local timezone never shifts a day. Both expect/return YYYY-MM-DD; any
+// malformed input returns the original string / NaN respectively.
+function addDaysUTC(yyyyMmDd: string, days: number): string {
+  const m = yyyyMmDd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return yyyyMmDd;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  const d = parseInt(m[3], 10);
+  const base = new Date(Date.UTC(y, mo - 1, d));
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().slice(0, 10);
+}
+
+function diffDaysUTC(a: string, b: string): number {
+  const am = a.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const bm = b.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!am || !bm) return NaN;
+  const aUTC = Date.UTC(
+    parseInt(am[1], 10),
+    parseInt(am[2], 10) - 1,
+    parseInt(am[3], 10),
+  );
+  const bUTC = Date.UTC(
+    parseInt(bm[1], 10),
+    parseInt(bm[2], 10) - 1,
+    parseInt(bm[3], 10),
+  );
+  return Math.round((aUTC - bUTC) / 86400000);
 }
 
 // renderTimeRange produces "14:30 – 16:00" / "from 14:30" / "until 16:00"

@@ -171,6 +171,21 @@ func writeError(w http.ResponseWriter, err error) {
 			"assignee must be a trip member")
 	case errors.Is(err, ErrTaskNotFound):
 		api.Err(w, http.StatusNotFound, "task_not_found", "task not found")
+	case errors.Is(err, ErrItineraryItemNotFound):
+		api.Err(w, http.StatusNotFound, "itinerary_item_not_found",
+			"itinerary item not found")
+	case errors.Is(err, ErrInvalidDayIndex):
+		api.Err(w, http.StatusBadRequest, "invalid_day_index",
+			"dayIndex must be a non-negative integer")
+	case errors.Is(err, ErrInvalidDate):
+		api.Err(w, http.StatusBadRequest, "invalid_date",
+			"date must be in YYYY-MM-DD format")
+	case errors.Is(err, ErrInvalidTime):
+		api.Err(w, http.StatusBadRequest, "invalid_time",
+			"time must be in HH:MM or HH:MM:SS format")
+	case errors.Is(err, ErrInvalidTimeRange):
+		api.Err(w, http.StatusBadRequest, "invalid_time_range",
+			"startsAt must be earlier than or equal to endsAt")
 	case errors.Is(err, trips.ErrNotFound):
 		api.Err(w, http.StatusNotFound, "trip_not_found", "trip not found")
 	case errors.Is(err, trips.ErrForbidden):

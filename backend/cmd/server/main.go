@@ -44,7 +44,12 @@ func main() {
 	authSvc := auth.NewService(userSvc, cfg.JWTSecret, cfg.JWTTTL)
 	friendsSvc := friends.NewService(friends.NewRepo(pool), userSvc)
 	tripSvc := trips.NewService(trips.NewRepo(pool), userSvc, friendsSvc)
-	planningSvc := planning.NewService(planning.NewRepo(pool), userSvc, tripSvc)
+	planningSvc := planning.NewService(
+		planning.NewRepo(pool),
+		planning.NewItineraryRepo(pool),
+		userSvc,
+		tripSvc,
+	)
 	agentSvc := agents.NewService() // M3 — stub, not wired into routes yet
 
 	_ = agentSvc

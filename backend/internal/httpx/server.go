@@ -100,6 +100,12 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/trips/{tripSlug}/tasks", planningH.Create)
 			r.Patch("/trips/{tripSlug}/tasks/{taskID}", planningH.Update)
 			r.Delete("/trips/{tripSlug}/tasks/{taskID}", planningH.Delete)
+
+			// M2 — trip itinerary (any trip member may CRUD)
+			r.Get("/trips/{tripSlug}/itinerary", planningH.ListItinerary)
+			r.Post("/trips/{tripSlug}/itinerary", planningH.CreateItinerary)
+			r.Patch("/trips/{tripSlug}/itinerary/{itemID}", planningH.UpdateItinerary)
+			r.Delete("/trips/{tripSlug}/itinerary/{itemID}", planningH.DeleteItinerary)
 		})
 	})
 

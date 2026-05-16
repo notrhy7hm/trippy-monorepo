@@ -35,13 +35,14 @@ type TripAccess interface {
 }
 
 type Service struct {
-	repo  *Repo
-	users *users.Service
-	trips TripAccess
+	repo      *Repo
+	itinerary *ItineraryRepo
+	users     *users.Service
+	trips     TripAccess
 }
 
-func NewService(r *Repo, u *users.Service, t TripAccess) *Service {
-	return &Service{repo: r, users: u, trips: t}
+func NewService(r *Repo, ir *ItineraryRepo, u *users.Service, t TripAccess) *Service {
+	return &Service{repo: r, itinerary: ir, users: u, trips: t}
 }
 
 // ListTasks returns the trip's tasks if the caller is a trip member.

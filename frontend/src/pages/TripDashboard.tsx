@@ -11,6 +11,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { PlanningBoard } from "../components/PlanningBoard";
+import { ItineraryBoard } from "../components/ItineraryBoard";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -482,6 +483,13 @@ export function TripDashboard() {
       </p>
 
       <PlanningBoard
+        tripSlug={tripSlug}
+        members={members}
+        viewerIsMember={!!myMember}
+        reloadTrip={reloadTrip}
+      />
+
+      <ItineraryBoard
         tripSlug={tripSlug}
         members={members}
         viewerIsMember={!!myMember}

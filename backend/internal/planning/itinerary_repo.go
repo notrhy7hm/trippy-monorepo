@@ -229,16 +229,22 @@ func (r *ItineraryRepo) CreateItineraryItem(ctx context.Context, tripID uuid.UUI
 
 // UpdateItineraryItem applies a partial update inside a single transaction.
 //
-//  1. SELECT FOR UPDATE locks the item row, reading its current day_index.
-//     Missing row -> ErrItineraryItemNotFound.
-//  2. If the request changes day_index AND does not include an explicit
+//  1. SELECT FOR UPDATE locks the item row, reading its current
+//     day_index, starts_at, and ends_at. Missing row ->
+//     ErrItineraryItemNotFound.
+//  2. Compute final (post-merge) starts_at and ends_at from the locked
+//     current values plus the request's Set* gates, and reject if the
+//     final range is inverted. Doing this under the row lock means two
+//     concurrent partial PATCHes cannot both pass a stale-row check
+//     and then commit an invalid combined state.
+//  3. If the request changes day_index AND does not include an explicit
 //     position, the item is rebucketed: a per-bucket advisory lock is
 //     taken on the new (trip, day_index) bucket and position is set to
 //     max(position) + 1000 within that bucket. The same lock that
 //     serializes CreateItineraryItem serializes rebucketing.
-//  3. Dynamic UPDATE applies all set fields; updated_at = now() is
+//  4. Dynamic UPDATE applies all set fields; updated_at = now() is
 //     always written.
-//  4. Joined item is re-read inside the tx and returned.
+//  5. Joined item is re-read inside the tx and returned.
 func (r *ItineraryRepo) UpdateItineraryItem(ctx context.Context, tripID, itemID uuid.UUID, in ItineraryUpdateInput) (ItineraryItem, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -246,17 +252,38 @@ func (r *ItineraryRepo) UpdateItineraryItem(ctx context.Context, tripID, itemID 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var currentDayIndex int
+	var (
+		currentDayIndex int
+		currentStartsAt sql.NullString
+		currentEndsAt   sql.NullString
+	)
 	err = tx.QueryRowxContext(ctx, `
-		SELECT day_index FROM trip_itinerary_items
+		SELECT day_index,
+		       starts_at::text AS starts_at,
+		       ends_at::text   AS ends_at
+		FROM trip_itinerary_items
 		WHERE trip_id = $1 AND id = $2
 		FOR UPDATE
-	`, tripID, itemID).Scan(&currentDayIndex)
+	`, tripID, itemID).Scan(&currentDayIndex, &currentStartsAt, &currentEndsAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ItineraryItem{}, ErrItineraryItemNotFound
 	}
 	if err != nil {
 		return ItineraryItem{}, err
+	}
+
+	// Final time-range check. Computed under the row lock so concurrent
+	// partial updates cannot race past a stale-row precheck.
+	finalStartsAt := currentStartsAt
+	if in.SetStartsAt {
+		finalStartsAt = nullStringFromPtr(in.StartsAt)
+	}
+	finalEndsAt := currentEndsAt
+	if in.SetEndsAt {
+		finalEndsAt = nullStringFromPtr(in.EndsAt)
+	}
+	if finalStartsAt.Valid && finalEndsAt.Valid && finalStartsAt.String > finalEndsAt.String {
+		return ItineraryItem{}, ErrInvalidTimeRange
 	}
 
 	var rebucketedPos *int
@@ -334,6 +361,16 @@ func (r *ItineraryRepo) UpdateItineraryItem(ctx context.Context, tripID, itemID 
 		return ItineraryItem{}, err
 	}
 	return rowToItineraryItem(row), nil
+}
+
+// nullStringFromPtr converts the *string the handler/service uses
+// (nil = SQL NULL, non-nil = value) to a sql.NullString suitable for
+// comparing against locked column reads.
+func nullStringFromPtr(p *string) sql.NullString {
+	if p == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: *p, Valid: true}
 }
 
 // DeleteItineraryItem hard-deletes a single item scoped to its trip.

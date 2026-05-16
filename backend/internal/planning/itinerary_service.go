@@ -52,17 +52,17 @@ func (s *Service) CreateItineraryItem(ctx context.Context, callerID uuid.UUID, s
 	return s.itinerary.CreateItineraryItem(ctx, tripID, in)
 }
 
-// UpdateItineraryItem applies a partial update. The current item is
-// loaded first so the time-range check sees the *final* (post-merge)
-// startsAt / endsAt — otherwise a request that only changes one of the
-// two could end up storing an invalid range.
+// UpdateItineraryItem applies a partial update.
+//
+// Per-field shape validation (dayIndex >= 0, title trimmed non-empty,
+// position >= 0) happens here before any DB work. The cross-field
+// startsAt / endsAt range check intentionally lives inside
+// repo.UpdateItineraryItem under SELECT ... FOR UPDATE so concurrent
+// partial PATCHes cannot both pass a stale-row precheck and then commit
+// an invalid combined state. The repo also handles the missing-item
+// case (ErrItineraryItemNotFound).
 func (s *Service) UpdateItineraryItem(ctx context.Context, callerID uuid.UUID, slug string, itemID uuid.UUID, in ItineraryUpdateInput) (ItineraryItem, error) {
 	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
-	if err != nil {
-		return ItineraryItem{}, err
-	}
-
-	current, err := s.itinerary.ItineraryItemByIDForTrip(ctx, tripID, itemID)
 	if err != nil {
 		return ItineraryItem{}, err
 	}
@@ -81,21 +81,6 @@ func (s *Service) UpdateItineraryItem(ctx context.Context, callerID uuid.UUID, s
 
 	if in.Position != nil && *in.Position < 0 {
 		return ItineraryItem{}, ErrInvalidPosition
-	}
-
-	// Compute the final startsAt / endsAt after this update would apply
-	// and reject impossible ranges. SetX gates take precedence over the
-	// item's current value; nil after a Set means clear.
-	finalStartsAt := current.StartsAt
-	if in.SetStartsAt {
-		finalStartsAt = in.StartsAt
-	}
-	finalEndsAt := current.EndsAt
-	if in.SetEndsAt {
-		finalEndsAt = in.EndsAt
-	}
-	if finalStartsAt != nil && finalEndsAt != nil && *finalStartsAt > *finalEndsAt {
-		return ItineraryItem{}, ErrInvalidTimeRange
 	}
 
 	return s.itinerary.UpdateItineraryItem(ctx, tripID, itemID, in)

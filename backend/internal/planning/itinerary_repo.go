@@ -189,17 +189,26 @@ func nextItineraryPosition(ctx context.Context, tx *sqlx.Tx, tripID uuid.UUID, d
 // inside a transaction-scoped advisory lock on the (trip, day_index)
 // bucket so two parallel POSTs in the same bucket cannot tie at the same
 // position.
+//
+// Service contract: in.DayIndex must be non-nil by the time this is
+// called — the service resolves the optional/derived value. The nil
+// guard here is defensive.
 func (r *ItineraryRepo) CreateItineraryItem(ctx context.Context, tripID uuid.UUID, in ItineraryCreateInput) (ItineraryItem, error) {
+	dayIndex := 0
+	if in.DayIndex != nil {
+		dayIndex = *in.DayIndex
+	}
+
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return ItineraryItem{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := lockItineraryPositionBucket(ctx, tx, tripID, in.DayIndex); err != nil {
+	if err := lockItineraryPositionBucket(ctx, tx, tripID, dayIndex); err != nil {
 		return ItineraryItem{}, err
 	}
-	nextPos, err := nextItineraryPosition(ctx, tx, tripID, in.DayIndex)
+	nextPos, err := nextItineraryPosition(ctx, tx, tripID, dayIndex)
 	if err != nil {
 		return ItineraryItem{}, err
 	}
@@ -212,7 +221,7 @@ func (r *ItineraryRepo) CreateItineraryItem(ctx context.Context, tripID uuid.UUI
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id
 	`,
-		tripID, in.DayIndex, in.Date, in.Title, in.Notes,
+		tripID, dayIndex, in.Date, in.Title, in.Notes,
 		in.LocationName, in.StartsAt, in.EndsAt, nextPos, in.CreatedByUserID,
 	).Scan(&id); err != nil {
 		return ItineraryItem{}, err
@@ -239,22 +248,30 @@ func (r *ItineraryRepo) CreateItineraryItem(ctx context.Context, tripID uuid.UUI
 // UpdateItineraryItem applies a partial update inside a single transaction.
 //
 //  1. SELECT FOR UPDATE locks the item row, reading its current
-//     day_index, starts_at, and ends_at. Missing row ->
+//     day_index, date, starts_at, and ends_at. Missing row ->
 //     ErrItineraryItemNotFound.
 //  2. Compute final (post-merge) starts_at and ends_at from the locked
 //     current values plus the request's Set* gates, and reject if the
 //     final range is inverted. Doing this under the row lock means two
 //     concurrent partial PATCHes cannot both pass a stale-row check
 //     and then commit an invalid combined state.
-//  3. If the request changes day_index AND does not include an explicit
+//  3. Compute final dayIndex and final date the same way, then check
+//     against the trip's date range (tripStartsOn / tripEndsOn). Same
+//     lock-scoped guarantee.
+//  4. If the request changes day_index AND does not include an explicit
 //     position, the item is rebucketed: a per-bucket advisory lock is
 //     taken on the new (trip, day_index) bucket and position is set to
 //     max(position) + 1000 within that bucket. The same lock that
 //     serializes CreateItineraryItem serializes rebucketing.
-//  4. Dynamic UPDATE applies all set fields; updated_at = now() is
+//  5. Dynamic UPDATE applies all set fields; updated_at = now() is
 //     always written.
-//  5. Joined item is re-read inside the tx and returned.
-func (r *ItineraryRepo) UpdateItineraryItem(ctx context.Context, tripID, itemID uuid.UUID, in ItineraryUpdateInput) (ItineraryItem, error) {
+//  6. Joined item is re-read inside the tx and returned.
+func (r *ItineraryRepo) UpdateItineraryItem(
+	ctx context.Context,
+	tripID, itemID uuid.UUID,
+	tripStartsOn, tripEndsOn *time.Time,
+	in ItineraryUpdateInput,
+) (ItineraryItem, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return ItineraryItem{}, err
@@ -263,17 +280,19 @@ func (r *ItineraryRepo) UpdateItineraryItem(ctx context.Context, tripID, itemID 
 
 	var (
 		currentDayIndex int
+		currentDate     sql.NullString
 		currentStartsAt sql.NullString
 		currentEndsAt   sql.NullString
 	)
 	err = tx.QueryRowxContext(ctx, `
 		SELECT day_index,
+		       date::text      AS date,
 		       starts_at::text AS starts_at,
 		       ends_at::text   AS ends_at
 		FROM trip_itinerary_items
 		WHERE trip_id = $1 AND id = $2
 		FOR UPDATE
-	`, tripID, itemID).Scan(&currentDayIndex, &currentStartsAt, &currentEndsAt)
+	`, tripID, itemID).Scan(&currentDayIndex, &currentDate, &currentStartsAt, &currentEndsAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ItineraryItem{}, ErrItineraryItemNotFound
 	}
@@ -293,6 +312,26 @@ func (r *ItineraryRepo) UpdateItineraryItem(ctx context.Context, tripID, itemID 
 	}
 	if finalStartsAt.Valid && finalEndsAt.Valid && finalStartsAt.String > finalEndsAt.String {
 		return ItineraryItem{}, ErrInvalidTimeRange
+	}
+
+	// Final dayIndex / date check against the trip's date range. Same
+	// row-lock scope as the time-range check above; PATCH that omits a
+	// field keeps the locked current value.
+	finalDayIndex := currentDayIndex
+	if in.DayIndex != nil {
+		finalDayIndex = *in.DayIndex
+	}
+	var finalDate *time.Time
+	switch {
+	case in.SetDate:
+		finalDate = in.Date // nil if cleared, non-nil if set
+	case currentDate.Valid:
+		if t, perr := time.Parse("2006-01-02", currentDate.String); perr == nil {
+			finalDate = &t
+		}
+	}
+	if err := validateDateDayAgainstTrip(finalDate, finalDayIndex, tripStartsOn, tripEndsOn); err != nil {
+		return ItineraryItem{}, err
 	}
 
 	var rebucketedPos *int

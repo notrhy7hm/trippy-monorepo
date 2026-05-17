@@ -31,8 +31,15 @@ type ItineraryItem struct {
 
 // ItineraryCreateInput is the service-facing create payload. The handler
 // parses date / time strings and forwards already-validated values.
+//
+// DayIndex is a *int (not int) so the service can distinguish "omitted"
+// from a literal 0. When omitted, the service may derive the dayIndex
+// from the trip's startsOn + the provided Date, and falls back to 0 when
+// neither is available. The service mutates DayIndex to the resolved
+// value before calling the repo, so repo callers can rely on it being
+// non-nil.
 type ItineraryCreateInput struct {
-	DayIndex        int
+	DayIndex        *int
 	Date            *time.Time
 	Title           string
 	Notes           string

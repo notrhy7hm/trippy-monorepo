@@ -186,6 +186,15 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrInvalidTimeRange):
 		api.Err(w, http.StatusBadRequest, "invalid_time_range",
 			"startsAt must be earlier than or equal to endsAt")
+	case errors.Is(err, ErrDateOutOfRange):
+		api.Err(w, http.StatusBadRequest, "itinerary_date_out_of_range",
+			"date must fall within the trip's date range")
+	case errors.Is(err, ErrDayOutOfRange):
+		api.Err(w, http.StatusBadRequest, "itinerary_day_out_of_range",
+			"day is outside the trip's day range")
+	case errors.Is(err, ErrDateDayMismatch):
+		api.Err(w, http.StatusBadRequest, "itinerary_date_day_mismatch",
+			"date and day must refer to the same trip day")
 	case errors.Is(err, trips.ErrNotFound):
 		api.Err(w, http.StatusNotFound, "trip_not_found", "trip not found")
 	case errors.Is(err, trips.ErrForbidden):

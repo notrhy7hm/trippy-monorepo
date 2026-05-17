@@ -50,13 +50,10 @@ func (h *Handler) CreateItinerary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dayIndex := 0
-	if in.DayIndex != nil {
-		dayIndex = *in.DayIndex
-	}
-
 	create := ItineraryCreateInput{
-		DayIndex: dayIndex,
+		// Pointer pass-through; the service decides whether to default
+		// to 0 or derive from date + trip.startsOn.
+		DayIndex: in.DayIndex,
 		Title:    in.Title,
 		Notes:    in.Notes,
 	}

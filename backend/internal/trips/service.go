@@ -97,6 +97,13 @@ func (s *Service) IsTripMember(ctx context.Context, tripID, userID uuid.UUID) (b
 	return ok, err
 }
 
+// TripDateRange returns the trip's optional starts_on / ends_on dates.
+// Either may be nil. Used by planning for itinerary date-vs-day
+// validation. Returns ErrNotFound for missing trips.
+func (s *Service) TripDateRange(ctx context.Context, tripID uuid.UUID) (*time.Time, *time.Time, error) {
+	return s.repo.DateRangeByID(ctx, tripID)
+}
+
 func (s *Service) BySlugForUser(ctx context.Context, slug string, userID uuid.UUID) (Trip, error) {
 	t, err := s.repo.BySlug(ctx, slug)
 	if err != nil {

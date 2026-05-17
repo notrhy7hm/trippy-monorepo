@@ -32,6 +32,10 @@ type TripAccess interface {
 	AssertMember(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, error)
 	// IsTripMember reports whether userID is a member of tripID.
 	IsTripMember(ctx context.Context, tripID, userID uuid.UUID) (bool, error)
+	// TripDateRange returns the trip's optional starts_on / ends_on dates
+	// (either may be nil). Itinerary uses this to constrain item
+	// dayIndex / date against the trip's bounds.
+	TripDateRange(ctx context.Context, tripID uuid.UUID) (*time.Time, *time.Time, error)
 }
 
 type Service struct {

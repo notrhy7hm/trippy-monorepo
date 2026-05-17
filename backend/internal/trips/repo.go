@@ -118,6 +118,29 @@ func (r *Repo) SoftDelete(ctx context.Context, slug string) error {
 	return nil
 }
 
+// DateRangeByID returns the trip's optional starts_on / ends_on dates.
+// Either may be nil. Used by sibling packages (planning) for itinerary
+// date-vs-day validation without a full trip fetch. Soft-deleted trips
+// surface as ErrNotFound, consistent with BySlug.
+func (r *Repo) DateRangeByID(ctx context.Context, tripID uuid.UUID) (*time.Time, *time.Time, error) {
+	var row struct {
+		StartsOn *time.Time `db:"starts_on"`
+		EndsOn   *time.Time `db:"ends_on"`
+	}
+	err := r.db.GetContext(ctx, &row, `
+		SELECT starts_on, ends_on
+		FROM trips
+		WHERE id = $1 AND deleted_at IS NULL
+	`, tripID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return row.StartsOn, row.EndsOn, nil
+}
+
 func (r *Repo) IsMember(ctx context.Context, tripID, userID uuid.UUID) (Role, bool, error) {
 	var role Role
 	err := r.db.GetContext(ctx, &role, `

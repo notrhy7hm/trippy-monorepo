@@ -84,6 +84,16 @@ func TestItineraryConcurrentCreatePositions(t *testing.T) {
 		}
 		seen[item.Position] = i
 	}
+	if t.Failed() {
+		return
+	}
+
+	// All N concurrent creates must also be visible via the list
+	// endpoint — no item silently lost to the bucket-lock path.
+	all := listItinerary(t, alice, trip.Slug)
+	if len(all) != N {
+		t.Fatalf("list size: got %d want %d", len(all), N)
+	}
 }
 
 // TestItineraryDayRebucket

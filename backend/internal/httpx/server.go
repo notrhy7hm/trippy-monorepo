@@ -10,6 +10,7 @@ import (
 
 	"github.com/trippyai/trippy/backend/internal/api"
 	"github.com/trippyai/trippy/backend/internal/auth"
+	"github.com/trippyai/trippy/backend/internal/budget"
 	"github.com/trippyai/trippy/backend/internal/friends"
 	"github.com/trippyai/trippy/backend/internal/planning"
 	"github.com/trippyai/trippy/backend/internal/trips"
@@ -22,6 +23,7 @@ type Deps struct {
 	Friends  *friends.Service
 	Trips    *trips.Service
 	Planning *planning.Service
+	Budget   *budget.Service
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -106,6 +108,14 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/trips/{tripSlug}/itinerary", planningH.CreateItinerary)
 			r.Patch("/trips/{tripSlug}/itinerary/{itemID}", planningH.UpdateItinerary)
 			r.Delete("/trips/{tripSlug}/itinerary/{itemID}", planningH.DeleteItinerary)
+
+			// M3 — trip budget: expenses + splits (any trip member may CRUD)
+			budgetH := budget.NewHandler(d.Budget)
+			r.Get("/trips/{tripSlug}/expenses", budgetH.List)
+			r.Post("/trips/{tripSlug}/expenses", budgetH.Create)
+			r.Patch("/trips/{tripSlug}/expenses/{expenseID}", budgetH.Update)
+			r.Delete("/trips/{tripSlug}/expenses/{expenseID}", budgetH.Delete)
+			r.Get("/trips/{tripSlug}/budget/summary", budgetH.Summary)
 		})
 	})
 

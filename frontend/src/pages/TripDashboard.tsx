@@ -10,6 +10,8 @@ import { useParams } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
+import { PlanningBoard } from "../components/PlanningBoard";
+import { ItineraryBoard } from "../components/ItineraryBoard";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -480,10 +482,25 @@ export function TripDashboard() {
         <span className="font-mono">{trip.slug}</span>
       </p>
 
-      <div className="mt-10 grid gap-4 md:grid-cols-3">
-        <PlannerCard title="Tasks" hint="Kanban board · M2" />
-        <PlannerCard title="Timeline" hint="Branching timeline · M2" />
-        <PlannerCard title="Budget" hint="Envelopes & splits · M2" />
+      <PlanningBoard
+        tripSlug={tripSlug}
+        members={members}
+        viewerIsMember={!!myMember}
+        reloadTrip={reloadTrip}
+      />
+
+      <ItineraryBoard
+        tripSlug={tripSlug}
+        members={members}
+        viewerIsMember={!!myMember}
+        reloadTrip={reloadTrip}
+        tripStartsOn={trip.startsOn}
+        tripEndsOn={trip.endsOn}
+      />
+
+      <div className="mt-10 grid gap-4 md:grid-cols-2">
+        <PlannerCard title="Timeline" hint="Branching timeline · later" />
+        <PlannerCard title="Budget" hint="Envelopes & splits · later" />
       </div>
 
       {canInvite ? (

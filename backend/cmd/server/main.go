@@ -12,6 +12,7 @@ import (
 
 	"github.com/trippyai/trippy/backend/internal/agents"
 	"github.com/trippyai/trippy/backend/internal/auth"
+	"github.com/trippyai/trippy/backend/internal/budget"
 	"github.com/trippyai/trippy/backend/internal/config"
 	"github.com/trippyai/trippy/backend/internal/db"
 	"github.com/trippyai/trippy/backend/internal/friends"
@@ -50,6 +51,7 @@ func main() {
 		userSvc,
 		tripSvc,
 	)
+	budgetSvc := budget.NewService(budget.NewRepo(pool), tripSvc)
 	agentSvc := agents.NewService() // M3 — stub, not wired into routes yet
 
 	_ = agentSvc
@@ -60,6 +62,7 @@ func main() {
 		Friends:  friendsSvc,
 		Trips:    tripSvc,
 		Planning: planningSvc,
+		Budget:   budgetSvc,
 	})
 
 	srv := &http.Server{

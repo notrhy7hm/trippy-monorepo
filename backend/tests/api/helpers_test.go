@@ -3,10 +3,13 @@ package api
 import (
 	"net/url"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // actor represents an authenticated user during a test.
 type actor struct {
+	ID       uuid.UUID
 	Username string
 	Email    string
 	Token    string
@@ -78,7 +81,13 @@ func registerUser(t *testing.T, username string) actor {
 	if resp.Token == "" {
 		t.Fatalf("register %s: empty token", username)
 	}
-	return actor{Username: username, Email: email, Token: resp.Token}
+	// The API never exposes user UUIDs, but budget expenses reference
+	// users by id, so tests resolve it straight from the test DB.
+	var id uuid.UUID
+	if err := testDB.Get(&id, "SELECT id FROM users WHERE username = $1", username); err != nil {
+		t.Fatalf("register %s: look up user id: %v", username, err)
+	}
+	return actor{ID: id, Username: username, Email: email, Token: resp.Token}
 }
 
 // ---------------------------------------------------------------------------

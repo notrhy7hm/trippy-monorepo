@@ -26,6 +26,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/trippyai/trippy/backend/internal/auth"
+	"github.com/trippyai/trippy/backend/internal/budget"
 	"github.com/trippyai/trippy/backend/internal/db"
 	"github.com/trippyai/trippy/backend/internal/friends"
 	"github.com/trippyai/trippy/backend/internal/httpx"
@@ -134,12 +135,14 @@ func newTestServer(pool *sqlx.DB) *httptest.Server {
 		userSvc,
 		tripSvc,
 	)
+	budgetSvc := budget.NewService(budget.NewRepo(pool), tripSvc)
 	handler := httpx.NewRouter(httpx.Deps{
 		Auth:     authSvc,
 		Users:    userSvc,
 		Friends:  friendsSvc,
 		Trips:    tripSvc,
 		Planning: planningSvc,
+		Budget:   budgetSvc,
 	})
 	return httptest.NewServer(handler)
 }
@@ -154,6 +157,8 @@ func cleanDB(t *testing.T) {
 			agent_action_proposals,
 			agent_messages,
 			trip_agents,
+			trip_expense_splits,
+			trip_expenses,
 			trip_itinerary_items,
 			trip_tasks,
 			trip_favorites,

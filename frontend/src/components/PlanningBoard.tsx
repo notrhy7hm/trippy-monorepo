@@ -282,7 +282,7 @@ export function PlanningBoard({
 
   return (
     <section className="mt-10">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
           <h2 className="text-lg font-medium">Planning</h2>
           <p className="text-xs text-ink-500">
@@ -297,6 +297,7 @@ export function PlanningBoard({
               setShowForm((v) => !v);
               setFormError(null);
             }}
+            className="w-full sm:w-auto"
           >
             {showForm ? "Cancel" : "Add task"}
           </Button>
@@ -326,7 +327,7 @@ export function PlanningBoard({
           )}
 
           {showForm && (
-            <Card className="mt-4 p-5">
+            <Card className="mt-4 p-4 sm:p-5">
               <CreateForm
                 form={form}
                 setForm={setForm}
@@ -349,10 +350,10 @@ export function PlanningBoard({
           )}
 
           {tasks && (
-            <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <div className="mt-4 grid gap-4 lg:grid-cols-3">
               {STATUSES.map((status) => (
                 <Card key={status} className="p-4">
-                  <div className="flex items-baseline justify-between">
+                  <div className="flex items-baseline justify-between gap-3">
                     <h3 className="text-sm font-medium">
                       {prettyStatus(status)}
                     </h3>
@@ -430,7 +431,7 @@ function CreateForm({
           placeholder="Optional"
         />
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <span className="text-xs font-medium text-ink-600">Priority</span>
           <div
@@ -494,7 +495,7 @@ function CreateForm({
         </div>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <Button type="submit" disabled={busy}>
+      <Button type="submit" disabled={busy} className="w-full sm:w-auto">
         {busy ? "Adding…" : "Add task"}
       </Button>
     </form>
@@ -515,11 +516,15 @@ function TaskCard({
   return (
     <article className="rounded-md border border-ink-200 bg-white p-3">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-medium leading-snug">{task.title}</p>
+        <p className="min-w-0 break-words text-sm font-medium leading-snug">
+          {task.title}
+        </p>
         <PriorityBadge p={task.priority} />
       </div>
       {task.description && (
-        <p className="mt-1 text-xs text-ink-500">{task.description}</p>
+        <p className="mt-1 break-words text-xs text-ink-500">
+          {task.description}
+        </p>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-500">
         {task.assignee && (
@@ -558,7 +563,7 @@ function TaskCard({
           type="button"
           onClick={() => onDelete(task)}
           disabled={locked}
-          className="ml-auto text-[10px] uppercase tracking-wider text-ink-400 hover:text-red-600 disabled:opacity-50 disabled:hover:text-ink-400"
+          className="ml-auto px-2 py-1 text-[10px] uppercase tracking-wider text-ink-400 hover:text-red-600 disabled:opacity-50 disabled:hover:text-ink-400"
         >
           Delete
         </button>
@@ -578,6 +583,7 @@ function PriorityBadge({ p }: { p: Priority }) {
 function pillClass(selected: boolean) {
   return [
     "rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors",
+    "max-w-full break-all text-center",
     selected
       ? "border-ink-950 bg-ink-950 text-white"
       : "border-ink-200 bg-white text-ink-600 hover:border-ink-400",

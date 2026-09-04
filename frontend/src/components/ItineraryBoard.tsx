@@ -76,7 +76,9 @@ export function ItineraryBoard({
   tripStartsOn?: string;
   tripEndsOn?: string;
 }) {
-  const tripStartDate = tripStartsOn ? formatDateDisplay(tripStartsOn) : undefined;
+  const tripStartDate = tripStartsOn
+    ? formatDateDisplay(tripStartsOn)
+    : undefined;
   const tripEndDate = tripEndsOn ? formatDateDisplay(tripEndsOn) : undefined;
   const [items, setItems] = useState<ItineraryItem[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -187,7 +189,12 @@ export function ItineraryBoard({
     e.preventDefault();
     if (creating || accessLost || !tripSlug) return;
 
-    const validated = validateForm(createForm, "create", tripStartDate, tripEndDate);
+    const validated = validateForm(
+      createForm,
+      "create",
+      tripStartDate,
+      tripEndDate,
+    );
     if (!validated.ok) {
       setCreateError(validated.error);
       return;
@@ -250,7 +257,12 @@ export function ItineraryBoard({
     if (busyItemId !== null || accessLost || !tripSlug || !editingItemId) {
       return;
     }
-    const validated = validateForm(editForm, "edit", tripStartDate, tripEndDate);
+    const validated = validateForm(
+      editForm,
+      "edit",
+      tripStartDate,
+      tripEndDate,
+    );
     if (!validated.ok) {
       setEditError(validated.error);
       return;
@@ -337,7 +349,7 @@ export function ItineraryBoard({
 
   return (
     <section className="mt-10">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
           <h2 className="text-lg font-medium">Itinerary</h2>
           <p className="text-xs text-ink-500">
@@ -348,6 +360,7 @@ export function ItineraryBoard({
           <Button
             variant={showForm ? "ghost" : "primary"}
             onClick={() => (showForm ? closeCreate() : openCreate())}
+            className="w-full sm:w-auto"
           >
             {showForm ? "Cancel" : "Add item"}
           </Button>
@@ -377,7 +390,7 @@ export function ItineraryBoard({
           )}
 
           {showForm && (
-            <Card className="mt-4 p-5">
+            <Card className="mt-4 p-4 sm:p-5">
               <ItineraryFormFields
                 form={createForm}
                 setForm={setCreateForm}
@@ -476,7 +489,7 @@ function DayGroup({
 }) {
   return (
     <div>
-      <h3 className="text-sm font-medium text-ink-700">
+      <h3 className="break-words text-sm font-medium text-ink-700">
         Day {group.dayIndex}
         {group.date && (
           <span className="ml-2 text-xs font-normal text-ink-400">
@@ -534,22 +547,28 @@ function ItineraryItemCard({
           {time}
         </p>
       )}
-      <p className="mt-0.5 text-sm font-medium leading-snug">{item.title}</p>
+      <p className="mt-0.5 break-words text-sm font-medium leading-snug">
+        {item.title}
+      </p>
       {item.locationName && (
-        <p className="mt-0.5 text-xs text-ink-500">{item.locationName}</p>
+        <p className="mt-0.5 break-words text-xs text-ink-500">
+          {item.locationName}
+        </p>
       )}
       {item.notes && (
-        <p className="mt-1 whitespace-pre-line text-xs text-ink-500">
+        <p className="mt-1 whitespace-pre-line break-words text-xs text-ink-500">
           {item.notes}
         </p>
       )}
-      <div className="mt-3 flex items-center gap-2 border-t border-ink-100 pt-2 text-[11px]">
-        <span className="text-ink-400">by @{item.createdBy.username}</span>
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-ink-100 pt-2 text-[11px]">
+        <span className="min-w-0 break-all text-ink-400">
+          by @{item.createdBy.username}
+        </span>
         <button
           type="button"
           onClick={onEdit}
           disabled={locked}
-          className="ml-auto uppercase tracking-wider text-ink-500 hover:text-ink-950 disabled:cursor-default disabled:opacity-50 disabled:hover:text-ink-500"
+          className="ml-auto px-2 py-1 uppercase tracking-wider text-ink-500 hover:text-ink-950 disabled:cursor-default disabled:opacity-50 disabled:hover:text-ink-500"
         >
           Edit
         </button>
@@ -557,7 +576,7 @@ function ItineraryItemCard({
           type="button"
           onClick={onDelete}
           disabled={locked}
-          className="uppercase tracking-wider text-ink-400 hover:text-red-600 disabled:opacity-50 disabled:hover:text-ink-400"
+          className="px-2 py-1 uppercase tracking-wider text-ink-400 hover:text-red-600 disabled:opacity-50 disabled:hover:text-ink-400"
         >
           Delete
         </button>
@@ -649,7 +668,7 @@ function ItineraryFormFields({
           placeholder="Optional"
         />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Day">
           <Input
             type="number"
@@ -672,7 +691,7 @@ function ItineraryFormFields({
           />
         </Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Starts at">
           <input
             type="time"
@@ -695,15 +714,15 @@ function ItineraryFormFields({
         </Field>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <div className="flex items-center gap-2">
-        <Button type="submit" disabled={busy}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Button type="submit" disabled={busy} className="w-full sm:w-auto">
           {submitLabel}
         </Button>
         <button
           type="button"
           onClick={onCancel}
           disabled={busy}
-          className="text-xs text-ink-500 hover:text-ink-950 disabled:opacity-50"
+          className="px-3 py-2 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-50"
         >
           Cancel
         </button>

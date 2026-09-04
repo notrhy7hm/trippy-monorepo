@@ -213,17 +213,18 @@ export function Friends() {
             {incoming.map((req) => (
               <li
                 key={req.username}
-                className="flex items-center justify-between py-3"
+                className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <PersonBlock
                   username={req.username}
                   displayName={req.displayName}
                   hint={req.message}
                 />
-                <div className="flex gap-2">
+                <div className="flex w-full gap-2 sm:w-auto">
                   <Button
                     onClick={() => acceptRequest(req.username)}
                     disabled={busyUser === req.username}
+                    className="flex-1 sm:flex-none"
                   >
                     Accept
                   </Button>
@@ -231,6 +232,7 @@ export function Friends() {
                     variant="secondary"
                     onClick={() => declineRequest(req.username)}
                     disabled={busyUser === req.username}
+                    className="flex-1 sm:flex-none"
                   >
                     Decline
                   </Button>
@@ -258,7 +260,7 @@ export function Friends() {
             {outgoing.map((req) => (
               <li
                 key={req.username}
-                className="flex items-center justify-between py-3"
+                className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <PersonBlock
                   username={req.username}
@@ -269,6 +271,7 @@ export function Friends() {
                   variant="ghost"
                   onClick={() => cancelRequest(req.username)}
                   disabled={busyUser === req.username}
+                  className="w-full sm:w-auto"
                 >
                   Cancel
                 </Button>
@@ -293,7 +296,7 @@ export function Friends() {
             {friends.map((f) => (
               <li
                 key={f.username}
-                className="flex items-center justify-between py-3"
+                className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <PersonBlock
                   username={f.username}
@@ -304,6 +307,7 @@ export function Friends() {
                   variant="ghost"
                   onClick={() => removeFriend(f.username)}
                   disabled={busyUser === f.username}
+                  className="w-full sm:w-auto"
                 >
                   Remove
                 </Button>
@@ -327,11 +331,11 @@ function Section({
 }) {
   return (
     <section>
-      <div className="mb-3 flex items-baseline justify-between">
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
         <h2 className="text-lg font-medium">{title}</h2>
         {hint && <p className="text-xs text-ink-500">{hint}</p>}
       </div>
-      <Card className="p-5">{children}</Card>
+      <Card className="p-4 sm:p-5">{children}</Card>
     </section>
   );
 }
@@ -399,7 +403,7 @@ function ResultsList({
       {results.map((r) => (
         <li
           key={r.username}
-          className="flex items-center justify-between py-3"
+          className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
         >
           <PersonBlock username={r.username} displayName={r.displayName} />
           <ResultAction
@@ -439,12 +443,13 @@ function ResultAction({
       return <Badge>You</Badge>;
     case "friend":
       return (
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center gap-2 sm:w-auto">
           <Badge>Friend</Badge>
           <Button
             variant="ghost"
             disabled={busy}
             onClick={() => onRemove(username)}
+            className="ml-auto sm:ml-0"
           >
             Remove
           </Button>
@@ -452,7 +457,11 @@ function ResultAction({
       );
     case "incoming_request":
       return (
-        <Button disabled={busy} onClick={() => onAccept(username)}>
+        <Button
+          disabled={busy}
+          onClick={() => onAccept(username)}
+          className="w-full sm:w-auto"
+        >
           Accept
         </Button>
       );
@@ -462,6 +471,7 @@ function ResultAction({
           variant="secondary"
           disabled={busy}
           onClick={() => onCancel(username)}
+          className="w-full sm:w-auto"
         >
           Cancel
         </Button>
@@ -469,7 +479,11 @@ function ResultAction({
     case "none":
     default:
       return (
-        <Button disabled={busy} onClick={() => onSend(username)}>
+        <Button
+          disabled={busy}
+          onClick={() => onSend(username)}
+          className="w-full sm:w-auto"
+        >
           Add friend
         </Button>
       );

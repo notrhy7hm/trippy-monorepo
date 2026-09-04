@@ -22,19 +22,19 @@ export function Trips() {
 
   return (
     <div>
-      <div className="flex items-end justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Your trips</h1>
           <p className="mt-1 text-sm text-ink-500">
             Owned and joined.
           </p>
         </div>
-        <Link to="/app/trips/new">
-          <Button>New trip</Button>
+        <Link to="/app/trips/new" className="w-full sm:w-auto">
+          <Button className="w-full sm:w-auto">New trip</Button>
         </Link>
       </div>
 
-      <div className="mt-8 grid gap-3">
+      <div className="mt-6 grid gap-3 sm:mt-8">
         {trips === null && (
           <p className="text-sm text-ink-500">Loading…</p>
         )}
@@ -47,16 +47,16 @@ export function Trips() {
         )}
         {trips?.map((t) => (
           <Link key={t.slug} to={`/app/trips/${t.slug}`}>
-            <Card className="p-5 transition-colors hover:border-ink-400">
-              <div className="flex items-center justify-between">
-                <div>
+            <Card className="p-4 transition-colors hover:border-ink-400 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
                   <h2 className="text-lg font-medium">{t.title}</h2>
                   <p className="mt-1 text-sm text-ink-500">
                     {formatRange(t.startsOn, t.endsOn)} ·{" "}
-                    <span className="font-mono text-xs">{t.slug}</span>
+                    <span className="break-all font-mono text-xs">{t.slug}</span>
                   </p>
                 </div>
-                <span className="rounded border border-ink-200 px-2 py-0.5 text-xs uppercase tracking-wider text-ink-500">
+                <span className="w-fit rounded border border-ink-200 px-2 py-0.5 text-xs uppercase tracking-wider text-ink-500">
                   {t.visibility}
                 </span>
               </div>

@@ -43,7 +43,7 @@ export function NewTrip() {
       <p className="mt-1 text-sm text-ink-500">
         You can add members and details later.
       </p>
-      <Card className="mt-8 p-6">
+      <Card className="mt-6 p-4 sm:mt-8 sm:p-6">
         <form onSubmit={onSubmit} className="space-y-4">
           <label className="block">
             <span className="text-xs font-medium text-ink-600">Title</span>
@@ -65,7 +65,7 @@ export function NewTrip() {
               onChange={(e) => setDescription(e.target.value)}
             />
           </label>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="block">
               <span className="text-xs font-medium text-ink-600">Starts</span>
               <Input
@@ -100,14 +100,15 @@ export function NewTrip() {
             </select>
           </label>
           {error && <p className="text-sm text-red-600">{error}</p>}
-          <div className="flex gap-2">
-            <Button type="submit" disabled={busy}>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button type="submit" disabled={busy} className="w-full sm:w-auto">
               {busy ? "Creating…" : "Create trip"}
             </Button>
             <Button
               type="button"
               variant="secondary"
               onClick={() => nav(-1)}
+              className="w-full sm:w-auto"
             >
               Cancel
             </Button>

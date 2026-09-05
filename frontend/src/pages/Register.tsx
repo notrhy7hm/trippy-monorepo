@@ -30,14 +30,14 @@ export function Register() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-6">
+    <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-4 py-8 sm:px-6">
       <Link
         to="/"
         className="mb-8 text-xs uppercase tracking-[0.2em] text-ink-500"
       >
         Trippy.ai
       </Link>
-      <Card className="w-full p-8">
+      <Card className="w-full p-5 sm:p-8">
         <h1 className="mb-1 text-2xl font-semibold tracking-tight">
           Create your account
         </h1>

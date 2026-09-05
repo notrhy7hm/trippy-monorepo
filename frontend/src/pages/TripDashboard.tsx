@@ -468,18 +468,18 @@ export function TripDashboard() {
   };
 
   return (
-    <div>
+    <div className="min-w-0">
       <p className="text-xs uppercase tracking-[0.18em] text-ink-500">
         Trip · {trip.visibility}
       </p>
-      <h1 className="title-gradient mt-1 text-4xl font-semibold tracking-tight">
+      <h1 className="title-gradient mt-1 break-words text-3xl font-semibold tracking-tight sm:text-4xl">
         {trip.title}
       </h1>
       {trip.description && (
         <p className="mt-3 max-w-2xl text-ink-600">{trip.description}</p>
       )}
       <p className="mt-2 text-sm text-ink-500">
-        <span className="font-mono">{trip.slug}</span>
+        <span className="break-all font-mono">{trip.slug}</span>
       </p>
 
       <PlanningBoard
@@ -498,7 +498,7 @@ export function TripDashboard() {
         tripEndsOn={trip.endsOn}
       />
 
-      <div className="mt-10 grid gap-4 md:grid-cols-2">
+      <div className="mt-8 grid gap-4 sm:mt-10 md:grid-cols-2">
         <PlannerCard title="Timeline" hint="Branching timeline · later" />
         <PlannerCard title="Budget" hint="Envelopes & splits · later" />
       </div>
@@ -506,7 +506,7 @@ export function TripDashboard() {
       {canInvite ? (
         <div className="mt-10 grid gap-6 md:grid-cols-3">
           <MembersCard
-            className="md:col-span-2 p-6"
+            className="p-4 sm:p-6 md:col-span-2"
             members={members}
             viewerIsOwner={myMember?.role === "owner"}
             busyMember={busyMember}
@@ -515,7 +515,7 @@ export function TripDashboard() {
             role={roleEditor}
             tags={tagsEditor}
           />
-          <Card className="p-6">
+          <Card className="p-4 sm:p-6">
             <h2 className="text-lg font-medium">Invite friends</h2>
             <p className="mt-2 text-sm text-ink-500">
               Only friends can be invited. Add people on the Friends page
@@ -571,7 +571,7 @@ export function TripDashboard() {
                   {invites.map((inv) => (
                     <li
                       key={inv.token}
-                      className="flex items-center justify-between gap-2 py-2"
+                      className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm">
@@ -586,6 +586,7 @@ export function TripDashboard() {
                         variant="ghost"
                         onClick={() => onRevoke(inv.token)}
                         disabled={busyToken === inv.token}
+                        className="w-full sm:w-auto"
                       >
                         Revoke
                       </Button>
@@ -599,7 +600,7 @@ export function TripDashboard() {
       ) : (
         <div className="mt-10">
           <MembersCard
-            className="p-6"
+            className="p-4 sm:p-6"
             members={members}
             viewerIsOwner={myMember?.role === "owner"}
             busyMember={busyMember}
@@ -726,7 +727,7 @@ function RolePills({
     <div
       role="radiogroup"
       aria-label="Invite role"
-      className={[className ?? "", "flex flex-wrap gap-2"].join(" ")}
+      className={[className ?? "", "grid grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:flex sm:flex-wrap"].join(" ")}
     >
       {INVITEABLE_ROLES.map((r) => {
         const selected = picked === r;
@@ -738,7 +739,7 @@ function RolePills({
             aria-checked={selected}
             onClick={() => setPicked(r)}
             className={[
-              "rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors",
+              "rounded-full border px-3 py-1 text-center text-xs font-medium uppercase tracking-wider transition-colors",
               selected
                 ? "border-ink-950 bg-ink-950 text-white"
                 : "border-ink-200 bg-white text-ink-600 hover:border-ink-400",
@@ -791,16 +792,16 @@ function MembersCard({
 
           return (
             <li key={m.username} className="space-y-2 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">{m.displayName}</p>
+                  <p className="truncate text-sm font-medium">{m.displayName}</p>
                   <p className="text-xs text-ink-500">@{m.username}</p>
                 </div>
                 {isRoleExpanded ? (
                   <div
                     role="radiogroup"
                     aria-label={`Change role for @${m.username}`}
-                    className="flex flex-wrap items-center gap-2"
+                    className="grid grid-cols-1 gap-2 min-[380px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-center"
                   >
                     {INVITEABLE_ROLES.map((r) => {
                       const selected = m.role === r;
@@ -813,7 +814,7 @@ function MembersCard({
                           onClick={() => role.onChange(m.username, r)}
                           disabled={locked || selected}
                           className={[
-                            "rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors",
+                            "rounded-full border px-3 py-1 text-center text-xs font-medium uppercase tracking-wider transition-colors",
                             selected
                               ? "border-ink-950 bg-ink-950 text-white"
                               : "border-ink-200 bg-white text-ink-600 hover:border-ink-400",
@@ -828,13 +829,13 @@ function MembersCard({
                       type="button"
                       onClick={onCancelEdit}
                       disabled={locked}
-                      className="px-2 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-60"
+                      className="px-2 py-1 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-60"
                     >
                       Cancel
                     </button>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded border border-ink-200 px-2 py-0.5 text-xs uppercase tracking-wider text-ink-500">
                       {prettyRole(m.role)}
                     </span>
@@ -960,11 +961,12 @@ function TagEditor({
         maxLength={MAX_TAG_LEN}
         autoComplete="off"
       />
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <Button
           type="button"
           onClick={() => onSave(username)}
           disabled={locked}
+          className="w-full sm:w-auto"
         >
           {locked ? "Saving…" : "Save"}
         </Button>
@@ -972,7 +974,7 @@ function TagEditor({
           type="button"
           onClick={onCancel}
           disabled={locked}
-          className="text-xs text-ink-500 hover:text-ink-950 disabled:opacity-50"
+          className="px-3 py-2 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-50"
         >
           Cancel
         </button>
@@ -983,7 +985,7 @@ function TagEditor({
 
 function PlannerCard({ title, hint }: { title: string; hint: string }) {
   return (
-    <Card className="p-6 opacity-70">
+    <Card className="p-4 opacity-70 sm:p-6">
       <p className="text-xs uppercase tracking-[0.18em] text-ink-500">Soon</p>
       <h3 className="mt-2 text-lg font-medium">{title}</h3>
       <p className="mt-2 text-sm text-ink-500">{hint}</p>

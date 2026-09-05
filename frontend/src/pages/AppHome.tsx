@@ -88,8 +88,8 @@ export function AppHome() {
   const hasInvites = (invites?.length ?? 0) > 0;
 
   return (
-    <div>
-      <h1 className="title-gradient text-3xl font-semibold tracking-tight">
+    <div className="min-w-0">
+      <h1 className="title-gradient break-words text-3xl font-semibold tracking-tight">
         Hello, {user?.displayName || user?.username}.
       </h1>
       <p className="mt-2 text-ink-500">Pick a trip, or start a new one.</p>
@@ -101,7 +101,7 @@ export function AppHome() {
       )}
 
       {hasInvites && invites && (
-        <Card className="mt-8 p-6">
+        <Card className="mt-6 p-4 sm:mt-8 sm:p-6">
           <h2 className="text-lg font-medium">Trip invites</h2>
           <p className="mt-1 text-sm text-ink-500">
             People have invited you to plan trips together.
@@ -125,10 +125,11 @@ export function AppHome() {
                     {new Date(inv.expiresAt).toLocaleDateString()}
                   </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex w-full gap-2 sm:w-auto">
                   <Button
                     onClick={() => accept(inv)}
                     disabled={busyToken === inv.token}
+                    className="flex-1 sm:flex-none"
                   >
                     Accept
                   </Button>
@@ -136,6 +137,7 @@ export function AppHome() {
                     variant="secondary"
                     onClick={() => decline(inv)}
                     disabled={busyToken === inv.token}
+                    className="flex-1 sm:flex-none"
                   >
                     Decline
                   </Button>
@@ -146,9 +148,9 @@ export function AppHome() {
         </Card>
       )}
 
-      <div className="mt-10 grid gap-4 md:grid-cols-3">
+      <div className="mt-8 grid gap-4 sm:mt-10 md:grid-cols-3">
         <Link to="/app/trips/new">
-          <Card className="h-full p-6 transition-colors hover:border-ink-400">
+          <Card className="h-full p-4 transition-colors hover:border-ink-400 sm:p-6">
             <p className="text-xs uppercase tracking-[0.18em] text-ink-500">
               New
             </p>
@@ -159,7 +161,7 @@ export function AppHome() {
           </Card>
         </Link>
         <Link to="/app/trips">
-          <Card className="h-full p-6 transition-colors hover:border-ink-400">
+          <Card className="h-full p-4 transition-colors hover:border-ink-400 sm:p-6">
             <p className="text-xs uppercase tracking-[0.18em] text-ink-500">
               Browse
             </p>
@@ -170,7 +172,7 @@ export function AppHome() {
           </Card>
         </Link>
         <Link to="/app/friends">
-          <Card className="h-full p-6 transition-colors hover:border-ink-400">
+          <Card className="h-full p-4 transition-colors hover:border-ink-400 sm:p-6">
             <p className="text-xs uppercase tracking-[0.18em] text-ink-500">
               Connect
             </p>

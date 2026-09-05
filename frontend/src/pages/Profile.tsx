@@ -41,11 +41,14 @@ export function Profile() {
       <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
       <p className="mt-1 text-sm text-ink-500">
         Your public handle is{" "}
-        <span className="font-mono text-ink-900">@{user.username}</span>.
-        Public route: <span className="font-mono">/u/{user.username}</span>{" "}
+        <span className="break-all font-mono text-ink-900">
+          @{user.username}
+        </span>.
+        Public route:{" "}
+        <span className="break-all font-mono">/u/{user.username}</span>{" "}
         (lands in M5).
       </p>
-      <Card className="mt-8 p-6">
+      <Card className="mt-6 p-4 sm:mt-8 sm:p-6">
         <form onSubmit={onSave} className="space-y-4">
           <label className="block">
             <span className="text-xs font-medium text-ink-600">

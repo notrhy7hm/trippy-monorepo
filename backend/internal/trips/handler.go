@@ -67,6 +67,16 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	api.JSON(w, http.StatusOK, t)
 }
 
+func (h *Handler) GetPublic(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "tripSlug")
+	t, err := h.svc.PublicBySlug(r.Context(), slug)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	api.JSON(w, http.StatusOK, t)
+}
+
 type updateReq struct {
 	Title       *string     `json:"title,omitempty"`
 	Description *string     `json:"description,omitempty"`

@@ -51,6 +51,9 @@ func NewRouter(d Deps) http.Handler {
 		r.Post("/auth/register", authH.Register)
 		r.Post("/auth/login", authH.Login)
 
+		tripsH := trips.NewHandler(d.Trips)
+		r.Get("/public/trips/{tripSlug}", tripsH.GetPublic)
+
 		// authenticated
 		r.Group(func(r chi.Router) {
 			r.Use(RequireAuth(d.Auth))
@@ -73,7 +76,6 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/friend-requests/from/{username}/decline", friendsH.Decline)
 			r.Delete("/friend-requests/to/{username}", friendsH.Cancel)
 
-			tripsH := trips.NewHandler(d.Trips)
 			r.Post("/trips", tripsH.Create)
 			r.Get("/trips", tripsH.ListMine)
 			r.Get("/trips/{tripSlug}", tripsH.Get)

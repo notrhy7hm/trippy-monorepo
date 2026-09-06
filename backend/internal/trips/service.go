@@ -123,6 +123,17 @@ func (s *Service) BySlugForUser(ctx context.Context, slug string, userID uuid.UU
 	return t, nil
 }
 
+func (s *Service) PublicBySlug(ctx context.Context, slug string) (Trip, error) {
+	t, err := s.repo.BySlug(ctx, slug)
+	if err != nil {
+		return Trip{}, err
+	}
+	if t.Visibility != VisibilityPublic {
+		return Trip{}, ErrNotFound
+	}
+	return t, nil
+}
+
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]Trip, error) {
 	return s.repo.ListForUser(ctx, userID)
 }
@@ -530,9 +541,7 @@ func invitesFromRows(rows []inviteRow) []Invite {
 	return out
 }
 
-// assertVisible enforces the trip's visibility rules. Friends-mode falls back to
-// private until the friends module lands in M1 — that's deliberate: we'd rather
-// be too strict than leak data.
+// assertVisible enforces the trip's visibility rules for authenticated users.
 func (s *Service) assertVisible(ctx context.Context, t Trip, userID uuid.UUID) error {
 	if t.Visibility == VisibilityPublic {
 		return nil
@@ -543,6 +552,15 @@ func (s *Service) assertVisible(ctx context.Context, t Trip, userID uuid.UUID) e
 	}
 	if ok {
 		return nil
+	}
+	if t.Visibility == VisibilityFriends {
+		ok, err := s.friends.AreFriends(ctx, userID, t.OwnerID)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
 	}
 	return ErrForbidden
 }

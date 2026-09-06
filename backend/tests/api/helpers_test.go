@@ -97,10 +97,15 @@ func registerUser(t *testing.T, username string) actor {
 // createTrip creates a private trip with no dates set.
 func createTrip(t *testing.T, owner actor, title string) tripResponse {
 	t.Helper()
+	return createTripWithVisibility(t, owner, title, "private")
+}
+
+func createTripWithVisibility(t *testing.T, owner actor, title, visibility string) tripResponse {
+	t.Helper()
 	var trip tripResponse
 	mustDo(t, "POST", "/api/v1/trips", owner.Token, map[string]any{
 		"title":      title,
-		"visibility": "private",
+		"visibility": visibility,
 	}, 201, &trip)
 	return trip
 }

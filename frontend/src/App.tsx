@@ -9,6 +9,7 @@ import { Profile } from "./pages/Profile";
 import { Trips } from "./pages/Trips";
 import { NewTrip } from "./pages/NewTrip";
 import { TripDashboard } from "./pages/TripDashboard";
+import { PublicTrip } from "./pages/PublicTrip";
 import { Friends } from "./pages/Friends";
 import { NotFound } from "./pages/NotFound";
 
@@ -16,6 +17,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/trips/:tripSlug" element={<PublicTrip />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
 

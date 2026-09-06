@@ -80,6 +80,12 @@ The Vite dev server proxies `/api` to `localhost:8080`.
 
 ## Container deployment
 
+Host prerequisites on Ubuntu:
+
+```sh
+sudo scripts/bootstrap-ubuntu.sh
+```
+
 Create a root `.env` file with a production JWT secret:
 
 ```sh

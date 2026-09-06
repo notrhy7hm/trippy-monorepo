@@ -128,7 +128,10 @@ export function Friends() {
 
   async function acceptRequest(username: string) {
     await withBusy(username, async () => {
-      await api("POST", `/friend-requests/from/${username}/accept`);
+      await api(
+        "POST",
+        `/friend-requests/from/${encodeURIComponent(username)}/accept`,
+      );
       patchResultRelation(username, "friend");
       await refresh();
     });
@@ -136,7 +139,10 @@ export function Friends() {
 
   async function declineRequest(username: string) {
     await withBusy(username, async () => {
-      await api("POST", `/friend-requests/from/${username}/decline`);
+      await api(
+        "POST",
+        `/friend-requests/from/${encodeURIComponent(username)}/decline`,
+      );
       patchResultRelation(username, "none");
       await refresh();
     });
@@ -144,7 +150,7 @@ export function Friends() {
 
   async function cancelRequest(username: string) {
     await withBusy(username, async () => {
-      await api("DELETE", `/friend-requests/to/${username}`);
+      await api("DELETE", `/friend-requests/to/${encodeURIComponent(username)}`);
       patchResultRelation(username, "none");
       await refresh();
     });
@@ -153,7 +159,7 @@ export function Friends() {
   async function removeFriend(username: string) {
     if (!window.confirm(`Remove @${username} from your friends?`)) return;
     await withBusy(username, async () => {
-      await api("DELETE", `/friends/${username}`);
+      await api("DELETE", `/friends/${encodeURIComponent(username)}`);
       patchResultRelation(username, "none");
       await refresh();
     });

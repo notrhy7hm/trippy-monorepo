@@ -37,9 +37,7 @@ type RegisterInput struct {
 }
 
 func (s *Service) Register(ctx context.Context, in RegisterInput) (users.User, string, error) {
-	email := strings.ToLower(strings.TrimSpace(in.Email))
-	uname := strings.ToLower(strings.TrimSpace(in.Username))
-	if email == "" || uname == "" || len(in.Password) < 8 {
+	if len(in.Password) < 8 {
 		return users.User{}, "", ErrInvalidInput
 	}
 
@@ -48,13 +46,16 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (users.User, s
 		return users.User{}, "", err
 	}
 	u, err := s.users.Create(ctx, users.CreateInput{
-		Email:        email,
-		Username:     uname,
+		Email:        in.Email,
+		Username:     in.Username,
 		PasswordHash: hash,
 	})
 	if err != nil {
 		if errors.Is(err, users.ErrUserExists) {
 			return users.User{}, "", ErrUserExists
+		}
+		if users.IsValidationError(err) {
+			return users.User{}, "", ErrInvalidInput
 		}
 		return users.User{}, "", err
 	}

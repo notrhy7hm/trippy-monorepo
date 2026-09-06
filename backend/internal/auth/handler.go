@@ -41,7 +41,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrUserExists):
 			api.Err(w, http.StatusConflict, "user_exists", "email or username already taken")
 		case errors.Is(err, ErrInvalidInput):
-			api.Err(w, http.StatusBadRequest, "invalid_input", "email, username, and password (min 8 chars) required")
+			api.Err(w, http.StatusBadRequest, "invalid_input",
+				"valid email, username (3-30 lowercase letters, digits, dashes, or underscores), and password (min 8 chars) required")
 		default:
 			api.Err(w, http.StatusInternalServerError, "register_failed", "could not register")
 		}

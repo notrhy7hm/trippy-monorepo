@@ -42,6 +42,81 @@ func TestTripMembersExposeUserIDs(t *testing.T) {
 	}
 }
 
+func TestTripCreateValidation(t *testing.T) {
+	cleanDB(t)
+	alice := registerUser(t, "alice")
+
+	tests := []struct {
+		name string
+		body map[string]any
+		code string
+	}{
+		{
+			name: "empty title",
+			body: map[string]any{"title": "   ", "visibility": "private"},
+			code: "invalid_title",
+		},
+		{
+			name: "invalid visibility",
+			body: map[string]any{"title": "Italy", "visibility": "secret"},
+			code: "invalid_visibility",
+		},
+		{
+			name: "inverted dates",
+			body: map[string]any{
+				"title":      "Italy",
+				"visibility": "private",
+				"startsOn":   "2026-06-20T00:00:00Z",
+				"endsOn":     "2026-06-15T00:00:00Z",
+			},
+			code: "invalid_date_range",
+		},
+	}
+
+	for _, tc := range tests {
+		code, body := doRequest(t, "POST", "/api/v1/trips", alice.Token, tc.body)
+		if code != 400 || !containsCode(body, tc.code) {
+			t.Fatalf("%s: status %d body %s want code %s", tc.name, code, body, tc.code)
+		}
+	}
+}
+
+func TestTripUpdateValidation(t *testing.T) {
+	cleanDB(t)
+	alice := registerUser(t, "alice")
+	trip := createTripWithDates(t, alice, "Italy",
+		"2026-06-15T00:00:00Z", "2026-06-20T00:00:00Z")
+
+	tests := []struct {
+		name string
+		body map[string]any
+		code string
+	}{
+		{
+			name: "empty title",
+			body: map[string]any{"title": ""},
+			code: "invalid_title",
+		},
+		{
+			name: "invalid visibility",
+			body: map[string]any{"visibility": "secret"},
+			code: "invalid_visibility",
+		},
+		{
+			name: "inverted final dates",
+			body: map[string]any{"endsOn": "2026-06-10T00:00:00Z"},
+			code: "invalid_date_range",
+		},
+	}
+
+	for _, tc := range tests {
+		code, body := doRequest(t, "PATCH", "/api/v1/trips/"+trip.Slug, alice.Token, tc.body)
+		if code != 400 || !containsCode(body, tc.code) {
+			t.Fatalf("%s: status %d body %s want code %s", tc.name, code, body, tc.code)
+		}
+	}
+}
+
 func TestFriendsTripVisibility(t *testing.T) {
 	cleanDB(t)
 	alice := registerUser(t, "alice")

@@ -19,8 +19,13 @@ export function NewTrip() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true);
     setError(null);
+    if (startsOn && endsOn && startsOn > endsOn) {
+      setError("Start date must be before or equal to end date.");
+      return;
+    }
+
+    setBusy(true);
     try {
       const t = await api<{ slug: string }>("POST", "/trips", {
         title,

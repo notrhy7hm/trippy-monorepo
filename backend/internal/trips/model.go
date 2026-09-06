@@ -14,6 +14,14 @@ const (
 	VisibilityPublic  Visibility = "public"
 )
 
+func (v Visibility) IsValid() bool {
+	switch v {
+	case VisibilityPrivate, VisibilityFriends, VisibilityPublic:
+		return true
+	}
+	return false
+}
+
 type Role string
 
 // Role values mirror the trip_role enum (migrations 0001 + 0003).

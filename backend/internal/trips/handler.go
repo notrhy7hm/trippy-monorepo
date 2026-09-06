@@ -38,7 +38,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Visibility:  in.Visibility,
 	})
 	if err != nil {
-		api.Err(w, http.StatusBadRequest, "create_failed", err.Error())
+		writeError(w, err)
 		return
 	}
 	api.JSON(w, http.StatusCreated, t)
@@ -272,6 +272,14 @@ func (h *Handler) ListMyInvites(w http.ResponseWriter, r *http.Request) {
 
 func writeError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrInvalidTitle):
+		api.Err(w, http.StatusBadRequest, "invalid_title", "title must not be empty")
+	case errors.Is(err, ErrInvalidVisibility):
+		api.Err(w, http.StatusBadRequest, "invalid_visibility",
+			"visibility must be private, friends, or public")
+	case errors.Is(err, ErrInvalidDateRange):
+		api.Err(w, http.StatusBadRequest, "invalid_date_range",
+			"startsOn must be before or equal to endsOn")
 	case errors.Is(err, ErrNotFound):
 		api.Err(w, http.StatusNotFound, "not_found", "trip not found")
 	case errors.Is(err, ErrForbidden):

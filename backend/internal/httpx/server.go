@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -24,6 +25,8 @@ type Deps struct {
 	Trips    *trips.Service
 	Planning *planning.Service
 	Budget   *budget.Service
+
+	AllowOrigin string
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -34,7 +37,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins(d.AllowOrigin),
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
@@ -122,4 +125,19 @@ func NewRouter(d Deps) http.Handler {
 	})
 
 	return r
+}
+
+func allowedOrigins(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		origin := strings.TrimSpace(part)
+		if origin != "" {
+			out = append(out, origin)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"http://localhost:5173"}
+	}
+	return out
 }

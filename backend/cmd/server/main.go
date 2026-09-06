@@ -63,6 +63,8 @@ func main() {
 		Trips:    tripSvc,
 		Planning: planningSvc,
 		Budget:   budgetSvc,
+
+		AllowOrigin: cfg.AllowOrigin,
 	})
 
 	srv := &http.Server{

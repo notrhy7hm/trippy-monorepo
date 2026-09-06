@@ -12,6 +12,7 @@ import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { PlanningBoard } from "../components/PlanningBoard";
 import { ItineraryBoard } from "../components/ItineraryBoard";
+import { BudgetBoard } from "../components/BudgetBoard";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -46,6 +47,7 @@ type Trip = {
 };
 
 type Member = {
+  userId: string;
   username: string;
   displayName: string;
   role: Role;
@@ -170,6 +172,14 @@ export function TripDashboard() {
   const myMember = members.find((m) => m.username === user?.username);
   const canInvite =
     myMember?.role === "owner" || myMember?.role === "admin";
+  const canManagePlanning =
+    myMember?.role === "owner" ||
+    myMember?.role === "admin" ||
+    myMember?.role === "planner";
+  const canManageBudget =
+    myMember?.role === "owner" ||
+    myMember?.role === "admin" ||
+    myMember?.role === "budget_manager";
 
   const refreshInviteCtx = useCallback(async () => {
     if (!tripSlug) return;
@@ -486,6 +496,7 @@ export function TripDashboard() {
         tripSlug={tripSlug}
         members={members}
         viewerIsMember={!!myMember}
+        canManage={canManagePlanning}
         reloadTrip={reloadTrip}
       />
 
@@ -493,14 +504,23 @@ export function TripDashboard() {
         tripSlug={tripSlug}
         members={members}
         viewerIsMember={!!myMember}
+        canManage={canManagePlanning}
         reloadTrip={reloadTrip}
         tripStartsOn={trip.startsOn}
         tripEndsOn={trip.endsOn}
       />
 
+      <BudgetBoard
+        tripSlug={tripSlug}
+        members={members}
+        viewerIsMember={!!myMember}
+        canManage={canManageBudget}
+        currentUserId={myMember?.userId}
+        reloadTrip={reloadTrip}
+      />
+
       <div className="mt-8 grid gap-4 sm:mt-10 md:grid-cols-2">
         <PlannerCard title="Timeline" hint="Branching timeline · later" />
-        <PlannerCard title="Budget" hint="Envelopes & splits · later" />
       </div>
 
       {canInvite ? (

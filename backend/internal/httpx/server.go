@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -24,6 +25,8 @@ type Deps struct {
 	Trips    *trips.Service
 	Planning *planning.Service
 	Budget   *budget.Service
+
+	AllowOrigin string
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -34,7 +37,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins(d.AllowOrigin),
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,
@@ -50,6 +53,9 @@ func NewRouter(d Deps) http.Handler {
 		authH := auth.NewHandler(d.Auth)
 		r.Post("/auth/register", authH.Register)
 		r.Post("/auth/login", authH.Login)
+
+		tripsH := trips.NewHandler(d.Trips)
+		r.Get("/public/trips/{tripSlug}", tripsH.GetPublic)
 
 		// authenticated
 		r.Group(func(r chi.Router) {
@@ -73,7 +79,6 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/friend-requests/from/{username}/decline", friendsH.Decline)
 			r.Delete("/friend-requests/to/{username}", friendsH.Cancel)
 
-			tripsH := trips.NewHandler(d.Trips)
 			r.Post("/trips", tripsH.Create)
 			r.Get("/trips", tripsH.ListMine)
 			r.Get("/trips/{tripSlug}", tripsH.Get)
@@ -96,20 +101,20 @@ func NewRouter(d Deps) http.Handler {
 			// per-user view of pending invites
 			r.Get("/me/trip-invites", tripsH.ListMyInvites)
 
-			// M2 — planning tasks (any trip member may CRUD)
+			// M2 — planning tasks (owner/admin/planner may mutate)
 			planningH := planning.NewHandler(d.Planning)
 			r.Get("/trips/{tripSlug}/tasks", planningH.List)
 			r.Post("/trips/{tripSlug}/tasks", planningH.Create)
 			r.Patch("/trips/{tripSlug}/tasks/{taskID}", planningH.Update)
 			r.Delete("/trips/{tripSlug}/tasks/{taskID}", planningH.Delete)
 
-			// M2 — trip itinerary (any trip member may CRUD)
+			// M2 — trip itinerary (owner/admin/planner may mutate)
 			r.Get("/trips/{tripSlug}/itinerary", planningH.ListItinerary)
 			r.Post("/trips/{tripSlug}/itinerary", planningH.CreateItinerary)
 			r.Patch("/trips/{tripSlug}/itinerary/{itemID}", planningH.UpdateItinerary)
 			r.Delete("/trips/{tripSlug}/itinerary/{itemID}", planningH.DeleteItinerary)
 
-			// M3 — trip budget: expenses + splits (any trip member may CRUD)
+			// M3 — trip budget: expenses + splits (owner/admin/budget manager may mutate)
 			budgetH := budget.NewHandler(d.Budget)
 			r.Get("/trips/{tripSlug}/expenses", budgetH.List)
 			r.Post("/trips/{tripSlug}/expenses", budgetH.Create)
@@ -120,4 +125,19 @@ func NewRouter(d Deps) http.Handler {
 	})
 
 	return r
+}
+
+func allowedOrigins(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		origin := strings.TrimSpace(part)
+		if origin != "" {
+			out = append(out, origin)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"http://localhost:5173"}
+	}
+	return out
 }

@@ -54,11 +54,13 @@ export function PlanningBoard({
   tripSlug,
   members,
   viewerIsMember,
+  canManage,
   reloadTrip,
 }: {
   tripSlug: string | undefined;
   members: BoardMember[];
   viewerIsMember: boolean;
+  canManage: boolean;
   // reloadTrip refreshes the parent dashboard's trip + members. We call
   // it when a task action returns 403/404 so viewerIsMember can re-derive
   // from the server's view of membership.
@@ -147,7 +149,7 @@ export function PlanningBoard({
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    if (creating || accessLost) return;
+    if (creating || accessLost || !canManage) return;
 
     const title = form.title.trim();
     if (title === "") {
@@ -219,7 +221,7 @@ export function PlanningBoard({
   );
 
   async function onChangeStatus(task: Task, next: Status) {
-    if (busyTaskId !== null || next === task.status || !tripSlug) return;
+    if (busyTaskId !== null || next === task.status || !tripSlug || !canManage) return;
     const gen = genRef.current;
     setBusyTaskId(task.id);
     setActionError(null);
@@ -251,7 +253,7 @@ export function PlanningBoard({
   }
 
   async function onDelete(task: Task) {
-    if (busyTaskId !== null || !tripSlug) return;
+    if (busyTaskId !== null || !tripSlug || !canManage) return;
     if (!window.confirm(`Delete "${task.title}"?`)) return;
     const gen = genRef.current;
     setBusyTaskId(task.id);
@@ -290,7 +292,7 @@ export function PlanningBoard({
             trip.
           </p>
         </div>
-        {viewerIsMember && !accessLost && (
+        {viewerIsMember && canManage && !accessLost && (
           <Button
             variant={showForm ? "ghost" : "primary"}
             onClick={() => {
@@ -322,6 +324,13 @@ export function PlanningBoard({
         </Card>
       ) : (
         <>
+          {!canManage && (
+            <p className="mt-3 text-xs text-ink-500">
+              You can view planning tasks. Planner, admin, or owner role is
+              required to change them.
+            </p>
+          )}
+
           {actionError && (
             <p className="mt-3 text-sm text-red-600">{actionError}</p>
           )}
@@ -372,6 +381,7 @@ export function PlanningBoard({
                           key={t.id}
                           task={t}
                           locked={busyTaskId !== null}
+                          canManage={canManage}
                           onChangeStatus={onChangeStatus}
                           onDelete={onDelete}
                         />
@@ -505,11 +515,13 @@ function CreateForm({
 function TaskCard({
   task,
   locked,
+  canManage,
   onChangeStatus,
   onDelete,
 }: {
   task: Task;
   locked: boolean;
+  canManage: boolean;
   onChangeStatus: (task: Task, next: Status) => void;
   onDelete: (task: Task) => void;
 }) {
@@ -537,6 +549,7 @@ function TaskCard({
           by @{task.createdBy.username}
         </span>
       </div>
+      {canManage && (
       <div className="mt-3 flex flex-wrap items-center gap-1 border-t border-ink-100 pt-3">
         {STATUSES.map((s) => {
           const selected = task.status === s;
@@ -568,6 +581,7 @@ function TaskCard({
           Delete
         </button>
       </div>
+      )}
     </article>
   );
 }

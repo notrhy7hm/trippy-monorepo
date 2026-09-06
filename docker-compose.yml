@@ -4,18 +4,47 @@ services:
     container_name: trippy-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: trippy
-      POSTGRES_PASSWORD: trippy
-      POSTGRES_DB: trippy
+      POSTGRES_USER: ${POSTGRES_USER:-trippy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trippy}
+      POSTGRES_DB: ${POSTGRES_DB:-trippy}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - trippy_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trippy -d trippy"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trippy} -d ${POSTGRES_DB:-trippy}"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: trippy-backend
+    restart: unless-stopped
+    environment:
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-trippy}:${POSTGRES_PASSWORD:-trippy}@postgres:5432/${POSTGRES_DB:-trippy}?sslmode=disable"
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET in .env or the shell before starting compose}"
+      JWT_TTL: "${JWT_TTL:-168h}"
+      ALLOW_ORIGIN: "${ALLOW_ORIGIN:-http://localhost}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: "${VITE_API_BASE:-}"
+    container_name: trippy-frontend
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      - backend
 
 volumes:
   trippy_pgdata:

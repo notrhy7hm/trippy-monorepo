@@ -6,6 +6,8 @@ import { Input } from "../components/ui/Input";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
 
+const USERNAME_RE = /^[a-z0-9][a-z0-9_-]{2,29}$/;
+
 export function Register() {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -18,9 +20,23 @@ export function Register() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    const cleanEmail = email.trim();
+    const cleanUsername = username.trim().toLowerCase();
+    if (!USERNAME_RE.test(cleanUsername)) {
+      setError(
+        "Username must be 3-30 characters and use lowercase letters, digits, dashes, or underscores.",
+      );
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+
     setBusy(true);
     try {
-      await register(email, username, password);
+      await register(cleanEmail, cleanUsername, password);
       nav("/app", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Sign-up failed");
@@ -62,12 +78,22 @@ export function Register() {
               className="mt-1"
               value={username}
               onChange={(e) =>
-                setUsername(e.target.value.toLowerCase().replace(/\s+/g, ""))
+                setUsername(
+                  e.target.value
+                    .toLowerCase()
+                    .replace(/[^a-z0-9_-]/g, "")
+                    .slice(0, 30),
+                )
               }
               autoComplete="username"
               required
               minLength={3}
+              maxLength={30}
+              pattern="[a-z0-9][a-z0-9_-]{2,29}"
             />
+            <span className="mt-1 block text-[11px] text-ink-400">
+              3-30 characters: lowercase letters, digits, dashes, underscores.
+            </span>
           </label>
           <label className="block">
             <span className="text-xs font-medium text-ink-600">Password</span>

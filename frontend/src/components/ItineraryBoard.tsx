@@ -58,6 +58,7 @@ const emptyForm: FormState = {
 export function ItineraryBoard({
   tripSlug,
   viewerIsMember,
+  canManage,
   reloadTrip,
   tripStartsOn,
   tripEndsOn,
@@ -68,6 +69,7 @@ export function ItineraryBoard({
   // signatures later.
   members: ItineraryMember[];
   viewerIsMember: boolean;
+  canManage: boolean;
   reloadTrip: () => Promise<void>;
   // Trip date bounds (from the Trip model on the dashboard). Either may
   // be undefined when the trip is still in relative-day mode. When both
@@ -175,6 +177,7 @@ export function ItineraryBoard({
 
   // ---- create -----------------------------------------------------------
   function openCreate() {
+    if (!canManage) return;
     setShowForm(true);
     setEditingItemId(null);
     setCreateForm(emptyForm);
@@ -187,7 +190,7 @@ export function ItineraryBoard({
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    if (creating || accessLost || !tripSlug) return;
+    if (creating || accessLost || !tripSlug || !canManage) return;
 
     const validated = validateForm(
       createForm,
@@ -233,6 +236,7 @@ export function ItineraryBoard({
 
   // ---- edit -------------------------------------------------------------
   function openEdit(item: ItineraryItem) {
+    if (!canManage) return;
     setShowForm(false);
     setEditingItemId(item.id);
     setEditForm({
@@ -254,7 +258,7 @@ export function ItineraryBoard({
 
   async function onSaveEdit(e: FormEvent) {
     e.preventDefault();
-    if (busyItemId !== null || accessLost || !tripSlug || !editingItemId) {
+    if (busyItemId !== null || accessLost || !tripSlug || !editingItemId || !canManage) {
       return;
     }
     const validated = validateForm(
@@ -313,7 +317,7 @@ export function ItineraryBoard({
 
   // ---- delete -----------------------------------------------------------
   async function onDelete(item: ItineraryItem) {
-    if (busyItemId !== null || accessLost || !tripSlug) return;
+    if (busyItemId !== null || accessLost || !tripSlug || !canManage) return;
     if (!window.confirm(`Delete "${item.title}"?`)) return;
     const gen = genRef.current;
     setBusyItemId(item.id);
@@ -356,7 +360,7 @@ export function ItineraryBoard({
             Day-by-day plan for this trip.
           </p>
         </div>
-        {viewerIsMember && !accessLost && (
+        {viewerIsMember && canManage && !accessLost && (
           <Button
             variant={showForm ? "ghost" : "primary"}
             onClick={() => (showForm ? closeCreate() : openCreate())}
@@ -385,6 +389,13 @@ export function ItineraryBoard({
         </Card>
       ) : (
         <>
+          {!canManage && (
+            <p className="mt-3 text-xs text-ink-500">
+              You can view the itinerary. Planner, admin, or owner role is
+              required to change it.
+            </p>
+          )}
+
           {actionError && (
             <p className="mt-3 text-sm text-red-600">{actionError}</p>
           )}
@@ -434,6 +445,7 @@ export function ItineraryBoard({
                   setEditForm={setEditForm}
                   editError={editError}
                   locked={locked}
+                  canManage={canManage}
                   onEdit={openEdit}
                   onCancelEdit={closeEdit}
                   onSaveEdit={onSaveEdit}
@@ -467,6 +479,7 @@ function DayGroup({
   setEditForm,
   editError,
   locked,
+  canManage,
   onEdit,
   onCancelEdit,
   onSaveEdit,
@@ -480,6 +493,7 @@ function DayGroup({
   setEditForm: (next: FormState) => void;
   editError: string | null;
   locked: boolean;
+  canManage: boolean;
   onEdit: (item: ItineraryItem) => void;
   onCancelEdit: () => void;
   onSaveEdit: (e: FormEvent) => void;
@@ -518,6 +532,7 @@ function DayGroup({
               key={item.id}
               item={item}
               locked={locked}
+              canManage={canManage}
               onEdit={() => onEdit(item)}
               onDelete={() => onDelete(item)}
             />
@@ -531,11 +546,13 @@ function DayGroup({
 function ItineraryItemCard({
   item,
   locked,
+  canManage,
   onEdit,
   onDelete,
 }: {
   item: ItineraryItem;
   locked: boolean;
+  canManage: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -564,22 +581,26 @@ function ItineraryItemCard({
         <span className="min-w-0 break-all text-ink-400">
           by @{item.createdBy.username}
         </span>
-        <button
-          type="button"
-          onClick={onEdit}
-          disabled={locked}
-          className="ml-auto px-2 py-1 uppercase tracking-wider text-ink-500 hover:text-ink-950 disabled:cursor-default disabled:opacity-50 disabled:hover:text-ink-500"
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={locked}
-          className="px-2 py-1 uppercase tracking-wider text-ink-400 hover:text-red-600 disabled:opacity-50 disabled:hover:text-ink-400"
-        >
-          Delete
-        </button>
+        {canManage && (
+          <>
+            <button
+              type="button"
+              onClick={onEdit}
+              disabled={locked}
+              className="ml-auto px-2 py-1 uppercase tracking-wider text-ink-500 hover:text-ink-950 disabled:cursor-default disabled:opacity-50 disabled:hover:text-ink-500"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={locked}
+              className="px-2 py-1 uppercase tracking-wider text-ink-400 hover:text-red-600 disabled:opacity-50 disabled:hover:text-ink-400"
+            >
+              Delete
+            </button>
+          </>
+        )}
       </div>
     </article>
   );

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/trippyai/trippy/backend/internal/trips"
 	"github.com/trippyai/trippy/backend/internal/users"
 )
 
@@ -30,6 +31,8 @@ type TripAccess interface {
 	// ErrForbidden / ErrNotFound sentinels; the service handler maps them
 	// onto safe HTTP codes via writeError below.
 	AssertMember(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, error)
+	// AssertMemberRole returns the caller's trip role alongside the trip id.
+	AssertMemberRole(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, trips.Role, error)
 	// IsTripMember reports whether userID is a member of tripID.
 	IsTripMember(ctx context.Context, tripID, userID uuid.UUID) (bool, error)
 	// TripDateRange returns the trip's optional starts_on / ends_on dates
@@ -62,7 +65,7 @@ func (s *Service) ListTasks(ctx context.Context, callerID uuid.UUID, slug string
 // to "todo"/"normal" when omitted. Assignee is resolved by username and
 // must already be a trip member.
 func (s *Service) CreateTask(ctx context.Context, callerID uuid.UUID, slug string, in CreateInput) (Task, error) {
-	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
+	tripID, err := s.assertPlanningManager(ctx, slug, callerID)
 	if err != nil {
 		return Task{}, err
 	}
@@ -109,7 +112,7 @@ func (s *Service) CreateTask(ctx context.Context, callerID uuid.UUID, slug strin
 // checked once at the top; per-field validation runs only on fields that
 // were sent (pointer non-nil).
 func (s *Service) UpdateTask(ctx context.Context, callerID uuid.UUID, slug string, taskID uuid.UUID, in UpdateInput) (Task, error) {
-	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
+	tripID, err := s.assertPlanningManager(ctx, slug, callerID)
 	if err != nil {
 		return Task{}, err
 	}
@@ -181,13 +184,24 @@ func (s *Service) UpdateTask(ctx context.Context, callerID uuid.UUID, slug strin
 	return s.repo.UpdateTask(ctx, tripID, taskID, row)
 }
 
-// DeleteTask hard-deletes a task. Any trip member can call this in M2.
+// DeleteTask hard-deletes a task. Planning managers only.
 func (s *Service) DeleteTask(ctx context.Context, callerID uuid.UUID, slug string, taskID uuid.UUID) error {
-	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
+	tripID, err := s.assertPlanningManager(ctx, slug, callerID)
 	if err != nil {
 		return err
 	}
 	return s.repo.DeleteTask(ctx, tripID, taskID)
+}
+
+func (s *Service) assertPlanningManager(ctx context.Context, slug string, callerID uuid.UUID) (uuid.UUID, error) {
+	tripID, role, err := s.trips.AssertMemberRole(ctx, slug, callerID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if !trips.CanManagePlanning(role) {
+		return uuid.Nil, trips.ErrForbidden
+	}
+	return tripID, nil
 }
 
 // resolveAssignee turns a (possibly empty) username into an optional user

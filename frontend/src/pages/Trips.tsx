@@ -70,7 +70,7 @@ export function Trips() {
 
 function formatRange(a?: string, b?: string) {
   if (!a && !b) return "No dates set";
-  const fmt = (d: string) => new Date(d).toLocaleDateString();
+  const fmt = (d: string) => d.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? d;
   if (a && b) return `${fmt(a)} – ${fmt(b)}`;
   return fmt(a ?? b!);
 }

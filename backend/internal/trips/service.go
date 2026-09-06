@@ -14,6 +14,9 @@ import (
 )
 
 var (
+	ErrInvalidTitle            = errors.New("title must not be empty")
+	ErrInvalidVisibility       = errors.New("invalid visibility")
+	ErrInvalidDateRange        = errors.New("starts_on must be before or equal to ends_on")
 	ErrForbidden               = errors.New("forbidden")
 	ErrInvalidRole             = errors.New("invalid role")
 	ErrCannotInviteSelf        = errors.New("cannot invite yourself")
@@ -50,12 +53,10 @@ func NewService(r *Repo, u *users.Service, f FriendsChecker) *Service {
 }
 
 func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput) (Trip, error) {
-	in.Title = strings.TrimSpace(in.Title)
-	if in.Title == "" {
-		return Trip{}, errors.New("title required")
-	}
-	if in.Visibility == "" {
-		in.Visibility = VisibilityPrivate
+	var err error
+	in, err = normalizeCreateInput(in)
+	if err != nil {
+		return Trip{}, err
 	}
 
 	// Retry slug generation a few times to absorb the rare suffix collision.
@@ -75,18 +76,26 @@ func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput)
 // need a one-shot slug -> tripID + membership check without importing the
 // repo directly.
 func (s *Service) AssertMember(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, error) {
+	tripID, _, err := s.AssertMemberRole(ctx, slug, userID)
+	return tripID, err
+}
+
+// AssertMemberRole returns the trip UUID and the caller's role if userID is a
+// member of the trip addressed by slug. ErrNotFound means the trip is gone;
+// ErrForbidden means the caller is not a member.
+func (s *Service) AssertMemberRole(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, Role, error) {
 	trip, err := s.repo.BySlug(ctx, slug)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, "", err
 	}
-	_, ok, err := s.repo.IsMember(ctx, trip.ID, userID)
+	role, ok, err := s.repo.IsMember(ctx, trip.ID, userID)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, "", err
 	}
 	if !ok {
-		return uuid.Nil, ErrForbidden
+		return uuid.Nil, "", ErrForbidden
 	}
-	return trip.ID, nil
+	return trip.ID, role, nil
 }
 
 // IsTripMember reports whether userID is a member of tripID. Sibling
@@ -115,6 +124,17 @@ func (s *Service) BySlugForUser(ctx context.Context, slug string, userID uuid.UU
 	return t, nil
 }
 
+func (s *Service) PublicBySlug(ctx context.Context, slug string) (Trip, error) {
+	t, err := s.repo.BySlug(ctx, slug)
+	if err != nil {
+		return Trip{}, err
+	}
+	if t.Visibility != VisibilityPublic {
+		return Trip{}, ErrNotFound
+	}
+	return t, nil
+}
+
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]Trip, error) {
 	return s.repo.ListForUser(ctx, userID)
 }
@@ -130,6 +150,10 @@ func (s *Service) Update(ctx context.Context, slug string, userID uuid.UUID, in 
 	}
 	if !ok || (role != RoleOwner && role != RoleAdmin) {
 		return Trip{}, ErrForbidden
+	}
+	in, err = normalizeUpdateInput(t, in)
+	if err != nil {
+		return Trip{}, err
 	}
 	return s.repo.Update(ctx, slug, in)
 }
@@ -461,6 +485,69 @@ func canInvite(r Role) bool {
 	return r == RoleOwner || r == RoleAdmin
 }
 
+func CanManagePlanning(r Role) bool {
+	return r == RoleOwner || r == RoleAdmin || r == RolePlanner
+}
+
+func CanManageBudget(r Role) bool {
+	return r == RoleOwner || r == RoleAdmin || r == RoleBudgetManager
+}
+
+func normalizeCreateInput(in CreateInput) (CreateInput, error) {
+	in.Title = strings.TrimSpace(in.Title)
+	if in.Title == "" {
+		return CreateInput{}, ErrInvalidTitle
+	}
+	if in.Visibility == "" {
+		in.Visibility = VisibilityPrivate
+	}
+	if !in.Visibility.IsValid() {
+		return CreateInput{}, ErrInvalidVisibility
+	}
+	if invalidDateRange(in.StartsOn, in.EndsOn) {
+		return CreateInput{}, ErrInvalidDateRange
+	}
+	return in, nil
+}
+
+func normalizeUpdateInput(current Trip, in UpdateInput) (UpdateInput, error) {
+	if in.Title != nil {
+		title := strings.TrimSpace(*in.Title)
+		if title == "" {
+			return UpdateInput{}, ErrInvalidTitle
+		}
+		in.Title = &title
+	}
+	if in.Visibility != nil && !in.Visibility.IsValid() {
+		return UpdateInput{}, ErrInvalidVisibility
+	}
+
+	startsOn := current.StartsOn
+	if in.StartsOn != nil {
+		startsOn = in.StartsOn
+	}
+	endsOn := current.EndsOn
+	if in.EndsOn != nil {
+		endsOn = in.EndsOn
+	}
+	if invalidDateRange(startsOn, endsOn) {
+		return UpdateInput{}, ErrInvalidDateRange
+	}
+	return in, nil
+}
+
+func invalidDateRange(startsOn, endsOn *time.Time) bool {
+	if startsOn == nil || endsOn == nil {
+		return false
+	}
+	return dateOnly(*endsOn).Before(dateOnly(*startsOn))
+}
+
+func dateOnly(t time.Time) time.Time {
+	u := t.UTC()
+	return time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC)
+}
+
 // isAssignableRole limits invite roles to the set the inviter may grant.
 // Owner is intentionally excluded; ownership transfer is out of scope for M1.
 func isAssignableRole(r Role) bool {
@@ -514,9 +601,7 @@ func invitesFromRows(rows []inviteRow) []Invite {
 	return out
 }
 
-// assertVisible enforces the trip's visibility rules. Friends-mode falls back to
-// private until the friends module lands in M1 — that's deliberate: we'd rather
-// be too strict than leak data.
+// assertVisible enforces the trip's visibility rules for authenticated users.
 func (s *Service) assertVisible(ctx context.Context, t Trip, userID uuid.UUID) error {
 	if t.Visibility == VisibilityPublic {
 		return nil
@@ -527,6 +612,15 @@ func (s *Service) assertVisible(ctx context.Context, t Trip, userID uuid.UUID) e
 	}
 	if ok {
 		return nil
+	}
+	if t.Visibility == VisibilityFriends {
+		ok, err := s.friends.AreFriends(ctx, userID, t.OwnerID)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
 	}
 	return ErrForbidden
 }

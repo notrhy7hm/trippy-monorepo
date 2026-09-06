@@ -1,6 +1,7 @@
 package users
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/trippyai/trippy/backend/internal/api"
@@ -37,6 +38,14 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		AvatarURL:   in.AvatarURL,
 	})
 	if err != nil {
+		if IsValidationError(err) {
+			api.Err(w, http.StatusBadRequest, "invalid_profile", err.Error())
+			return
+		}
+		if errors.Is(err, ErrNotFound) {
+			api.Err(w, http.StatusNotFound, "not_found", "user not found")
+			return
+		}
 		api.Err(w, http.StatusInternalServerError, "update_failed", err.Error())
 		return
 	}

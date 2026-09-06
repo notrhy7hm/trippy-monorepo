@@ -1,6 +1,7 @@
 # backend/tests/api
 
-DB-backed HTTP integration tests for the M2 planning APIs.
+DB-backed HTTP integration tests for the M1-M3 API surface: auth, friends,
+trips, planning, itinerary, and budget.
 
 ## Safety
 
@@ -37,7 +38,8 @@ psql -h localhost -U trippy -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE tri
 ## Running migrations
 
 The test setup does **not** auto-migrate. Run goose against the test DB
-before the first run (and whenever a new migration lands):
+before the first run and whenever a new migration lands. The schema smoke check
+expects the M3 budget tables from migration `0006_budget.sql`.
 
 ```powershell
 $env:TEST_DATABASE_URL = "postgres://trippy:trippy@localhost:5432/trippy_test?sslmode=disable"

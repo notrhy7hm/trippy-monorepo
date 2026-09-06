@@ -21,6 +21,8 @@ export class ApiError extends Error {
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
+const API_BASE = apiBase(import.meta.env.VITE_API_BASE);
+
 export async function api<T = unknown>(
   method: Method,
   path: string,
@@ -32,7 +34,7 @@ export async function api<T = unknown>(
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`/api/v1${path}`, {
+  const res = await fetch(`${API_BASE}${normalizePath(path)}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -43,12 +45,42 @@ export async function api<T = unknown>(
     window.dispatchEvent(new Event("trippy:unauthenticated"));
   }
 
-  const text = await res.text();
-  const parsed = text ? JSON.parse(text) : null;
+  const parsed = await parseResponse(res);
 
   if (!res.ok) {
-    const msg = (parsed && parsed.error) || res.statusText;
-    throw new ApiError(msg, res.status, parsed?.code);
+    const msg =
+      parsed && typeof parsed === "object" && "error" in parsed
+        ? String(parsed.error)
+        : res.statusText || "Request failed";
+    const code =
+      parsed && typeof parsed === "object" && "code" in parsed
+        ? String(parsed.code)
+        : undefined;
+    throw new ApiError(msg, res.status, code);
   }
   return parsed as T;
+}
+
+async function parseResponse(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return null;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    return text;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function apiBase(raw: string | undefined) {
+  const base = raw?.trim().replace(/\/+$/, "");
+  if (!base) return "/api/v1";
+  return base.endsWith("/api/v1") ? base : `${base}/api/v1`;
+}
+
+function normalizePath(path: string) {
+  return path.startsWith("/") ? path : `/${path}`;
 }

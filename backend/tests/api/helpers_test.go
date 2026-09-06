@@ -97,10 +97,15 @@ func registerUser(t *testing.T, username string) actor {
 // createTrip creates a private trip with no dates set.
 func createTrip(t *testing.T, owner actor, title string) tripResponse {
 	t.Helper()
+	return createTripWithVisibility(t, owner, title, "private")
+}
+
+func createTripWithVisibility(t *testing.T, owner actor, title, visibility string) tripResponse {
+	t.Helper()
 	var trip tripResponse
 	mustDo(t, "POST", "/api/v1/trips", owner.Token, map[string]any{
 		"title":      title,
-		"visibility": "private",
+		"visibility": visibility,
 	}, 201, &trip)
 	return trip
 }
@@ -136,10 +141,15 @@ func friendsBecome(t *testing.T, a, b actor) {
 // it on the invitee's side. Both parties must already be friends.
 func inviteAndJoin(t *testing.T, owner, invitee actor, slug string) {
 	t.Helper()
+	inviteAndJoinAs(t, owner, invitee, slug, "member")
+}
+
+func inviteAndJoinAs(t *testing.T, owner, invitee actor, slug, role string) {
+	t.Helper()
 	var inv inviteResponse
 	mustDo(t, "POST", "/api/v1/trips/"+slug+"/invites", owner.Token, map[string]string{
 		"identifier": invitee.Username,
-		"role":       "member",
+		"role":       role,
 	}, 201, &inv)
 	mustDo(t, "POST", "/api/v1/invites/"+inv.Token+"/accept", invitee.Token,
 		nil, 200, nil,

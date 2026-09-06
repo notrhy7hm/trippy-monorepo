@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/trippyai/trippy/backend/internal/agents"
 	"github.com/trippyai/trippy/backend/internal/auth"
 	"github.com/trippyai/trippy/backend/internal/budget"
 	"github.com/trippyai/trippy/backend/internal/config"
@@ -52,9 +51,6 @@ func main() {
 		tripSvc,
 	)
 	budgetSvc := budget.NewService(budget.NewRepo(pool), tripSvc)
-	agentSvc := agents.NewService() // M3 — stub, not wired into routes yet
-
-	_ = agentSvc
 
 	r := httpx.NewRouter(httpx.Deps{
 		Auth:     authSvc,
@@ -63,6 +59,8 @@ func main() {
 		Trips:    tripSvc,
 		Planning: planningSvc,
 		Budget:   budgetSvc,
+
+		AllowOrigin: cfg.AllowOrigin,
 	})
 
 	srv := &http.Server{

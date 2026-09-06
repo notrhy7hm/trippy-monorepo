@@ -116,7 +116,7 @@ func TestBudgetExpenseCreateWithSplits(t *testing.T) {
 	bob := registerUser(t, "bob")
 	friendsBecome(t, alice, bob)
 	trip := createTrip(t, alice, "Italy")
-	inviteAndJoin(t, alice, bob, trip.Slug)
+	inviteAndJoinAs(t, alice, bob, trip.Slug, "budget_manager")
 
 	exp := createExpense(t, alice, trip.Slug, map[string]any{
 		"title":        "Hotel",
@@ -161,6 +161,71 @@ func TestBudgetExpenseCreateWithSplits(t *testing.T) {
 	if all := listExpenses(t, bob, trip.Slug); len(all) != 1 {
 		t.Fatalf("bob list size: got %d want 1", len(all))
 	}
+}
+
+// TestBudgetRoleMutationAccess
+//
+// Plain members can read expenses and budget summaries but cannot create,
+// update, or delete expenses. The budget_manager role can mutate budget data.
+func TestBudgetRoleMutationAccess(t *testing.T) {
+	cleanDB(t)
+	alice := registerUser(t, "alice")
+	bob := registerUser(t, "bob")
+	bea := registerUser(t, "bea")
+	friendsBecome(t, alice, bob)
+	friendsBecome(t, alice, bea)
+	trip := createTrip(t, alice, "Italy")
+	inviteAndJoin(t, alice, bob, trip.Slug)
+	inviteAndJoinAs(t, alice, bea, trip.Slug, "budget_manager")
+
+	exp := createExpense(t, alice, trip.Slug, map[string]any{
+		"title":        "Hotel",
+		"amountCents":  10000,
+		"paidByUserId": alice.ID.String(),
+		"splits": []map[string]any{
+			{"userId": alice.ID.String(), "shareCents": 10000},
+		},
+	})
+
+	if all := listExpenses(t, bob, trip.Slug); len(all) != 1 {
+		t.Fatalf("member list size: got %d want 1", len(all))
+	}
+	if summary := budgetSummary(t, bob, trip.Slug); len(summary.Currencies) != 1 {
+		t.Fatalf("member summary currencies: got %d want 1", len(summary.Currencies))
+	}
+
+	base := "/api/v1/trips/" + trip.Slug + "/expenses"
+	if code, body := doRequest(t, "POST", base, bob.Token, map[string]any{
+		"title":        "member edit",
+		"amountCents":  100,
+		"paidByUserId": bob.ID.String(),
+		"splits":       []map[string]any{{"userId": bob.ID.String(), "shareCents": 100}},
+	}); code != 403 {
+		t.Fatalf("member create: status %d (want 403): %s", code, body)
+	}
+	if code, body := doRequest(t, "PATCH", base+"/"+exp.ID, bob.Token,
+		map[string]any{"title": "tampered"}); code != 403 {
+		t.Fatalf("member update: status %d (want 403): %s", code, body)
+	}
+	if code, body := doRequest(t, "DELETE", base+"/"+exp.ID, bob.Token, nil); code != 403 {
+		t.Fatalf("member delete: status %d (want 403): %s", code, body)
+	}
+
+	managed := createExpense(t, bea, trip.Slug, map[string]any{
+		"title":        "Taxi",
+		"amountCents":  4000,
+		"paidByUserId": bea.ID.String(),
+		"splits": []map[string]any{
+			{"userId": bea.ID.String(), "shareCents": 4000},
+		},
+	})
+	var updated expenseResponse
+	mustDo(t, "PATCH", base+"/"+managed.ID, bea.Token,
+		map[string]any{"title": "Airport taxi"}, 200, &updated)
+	if updated.Title != "Airport taxi" {
+		t.Fatalf("budget manager update title: got %q", updated.Title)
+	}
+	mustDo(t, "DELETE", base+"/"+managed.ID, bea.Token, nil, 204, nil)
 }
 
 // TestBudgetNonMemberCannotAccess
@@ -358,7 +423,7 @@ func TestBudgetSummaryBalancesAndSettlements(t *testing.T) {
 	bob := registerUser(t, "bob")
 	friendsBecome(t, alice, bob)
 	trip := createTrip(t, alice, "Italy")
-	inviteAndJoin(t, alice, bob, trip.Slug)
+	inviteAndJoinAs(t, alice, bob, trip.Slug, "budget_manager")
 
 	// Hotel 600.00 paid by alice, split 300/300.
 	createExpense(t, alice, trip.Slug, map[string]any{

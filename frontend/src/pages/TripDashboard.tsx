@@ -170,6 +170,14 @@ export function TripDashboard() {
   const myMember = members.find((m) => m.username === user?.username);
   const canInvite =
     myMember?.role === "owner" || myMember?.role === "admin";
+  const canManagePlanning =
+    myMember?.role === "owner" ||
+    myMember?.role === "admin" ||
+    myMember?.role === "planner";
+  const canManageBudget =
+    myMember?.role === "owner" ||
+    myMember?.role === "admin" ||
+    myMember?.role === "budget_manager";
 
   const refreshInviteCtx = useCallback(async () => {
     if (!tripSlug) return;
@@ -486,6 +494,7 @@ export function TripDashboard() {
         tripSlug={tripSlug}
         members={members}
         viewerIsMember={!!myMember}
+        canManage={canManagePlanning}
         reloadTrip={reloadTrip}
       />
 
@@ -493,6 +502,7 @@ export function TripDashboard() {
         tripSlug={tripSlug}
         members={members}
         viewerIsMember={!!myMember}
+        canManage={canManagePlanning}
         reloadTrip={reloadTrip}
         tripStartsOn={trip.startsOn}
         tripEndsOn={trip.endsOn}
@@ -500,7 +510,14 @@ export function TripDashboard() {
 
       <div className="mt-8 grid gap-4 sm:mt-10 md:grid-cols-2">
         <PlannerCard title="Timeline" hint="Branching timeline · later" />
-        <PlannerCard title="Budget" hint="Envelopes & splits · later" />
+        <PlannerCard
+          title="Budget"
+          hint={
+            canManageBudget
+              ? "Envelopes & splits · later"
+              : "Read-only unless you manage the budget"
+          }
+        />
       </div>
 
       {canInvite ? (

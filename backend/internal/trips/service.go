@@ -75,18 +75,26 @@ func (s *Service) Create(ctx context.Context, ownerID uuid.UUID, in CreateInput)
 // need a one-shot slug -> tripID + membership check without importing the
 // repo directly.
 func (s *Service) AssertMember(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, error) {
+	tripID, _, err := s.AssertMemberRole(ctx, slug, userID)
+	return tripID, err
+}
+
+// AssertMemberRole returns the trip UUID and the caller's role if userID is a
+// member of the trip addressed by slug. ErrNotFound means the trip is gone;
+// ErrForbidden means the caller is not a member.
+func (s *Service) AssertMemberRole(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, Role, error) {
 	trip, err := s.repo.BySlug(ctx, slug)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, "", err
 	}
-	_, ok, err := s.repo.IsMember(ctx, trip.ID, userID)
+	role, ok, err := s.repo.IsMember(ctx, trip.ID, userID)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, "", err
 	}
 	if !ok {
-		return uuid.Nil, ErrForbidden
+		return uuid.Nil, "", ErrForbidden
 	}
-	return trip.ID, nil
+	return trip.ID, role, nil
 }
 
 // IsTripMember reports whether userID is a member of tripID. Sibling
@@ -459,6 +467,14 @@ func (s *Service) requireFriendship(ctx context.Context, caller, target uuid.UUI
 
 func canInvite(r Role) bool {
 	return r == RoleOwner || r == RoleAdmin
+}
+
+func CanManagePlanning(r Role) bool {
+	return r == RoleOwner || r == RoleAdmin || r == RolePlanner
+}
+
+func CanManageBudget(r Role) bool {
+	return r == RoleOwner || r == RoleAdmin || r == RoleBudgetManager
 }
 
 // isAssignableRole limits invite roles to the set the inviter may grant.

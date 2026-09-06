@@ -40,7 +40,7 @@ func (s *Service) ListItineraryItems(ctx context.Context, callerID uuid.UUID, sl
 //   - Date / final DayIndex are validated against the trip's date range
 //     when the trip has startsOn (and, for upper bounds, endsOn).
 func (s *Service) CreateItineraryItem(ctx context.Context, callerID uuid.UUID, slug string, in ItineraryCreateInput) (ItineraryItem, error) {
-	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
+	tripID, err := s.assertPlanningManager(ctx, slug, callerID)
 	if err != nil {
 		return ItineraryItem{}, err
 	}
@@ -95,7 +95,7 @@ func (s *Service) CreateItineraryItem(ctx context.Context, callerID uuid.UUID, s
 // an invalid combined state. The repo also handles the missing-item
 // case (ErrItineraryItemNotFound).
 func (s *Service) UpdateItineraryItem(ctx context.Context, callerID uuid.UUID, slug string, itemID uuid.UUID, in ItineraryUpdateInput) (ItineraryItem, error) {
-	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
+	tripID, err := s.assertPlanningManager(ctx, slug, callerID)
 	if err != nil {
 		return ItineraryItem{}, err
 	}
@@ -201,10 +201,9 @@ func validateDateDayAgainstTrip(
 	return nil
 }
 
-// DeleteItineraryItem hard-deletes an item. Any trip member can call
-// this in M2.
+// DeleteItineraryItem hard-deletes an item. Planning managers only.
 func (s *Service) DeleteItineraryItem(ctx context.Context, callerID uuid.UUID, slug string, itemID uuid.UUID) error {
-	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
+	tripID, err := s.assertPlanningManager(ctx, slug, callerID)
 	if err != nil {
 		return err
 	}

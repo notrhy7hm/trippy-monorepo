@@ -96,20 +96,20 @@ func NewRouter(d Deps) http.Handler {
 			// per-user view of pending invites
 			r.Get("/me/trip-invites", tripsH.ListMyInvites)
 
-			// M2 — planning tasks (any trip member may CRUD)
+			// M2 — planning tasks (owner/admin/planner may mutate)
 			planningH := planning.NewHandler(d.Planning)
 			r.Get("/trips/{tripSlug}/tasks", planningH.List)
 			r.Post("/trips/{tripSlug}/tasks", planningH.Create)
 			r.Patch("/trips/{tripSlug}/tasks/{taskID}", planningH.Update)
 			r.Delete("/trips/{tripSlug}/tasks/{taskID}", planningH.Delete)
 
-			// M2 — trip itinerary (any trip member may CRUD)
+			// M2 — trip itinerary (owner/admin/planner may mutate)
 			r.Get("/trips/{tripSlug}/itinerary", planningH.ListItinerary)
 			r.Post("/trips/{tripSlug}/itinerary", planningH.CreateItinerary)
 			r.Patch("/trips/{tripSlug}/itinerary/{itemID}", planningH.UpdateItinerary)
 			r.Delete("/trips/{tripSlug}/itinerary/{itemID}", planningH.DeleteItinerary)
 
-			// M3 — trip budget: expenses + splits (any trip member may CRUD)
+			// M3 — trip budget: expenses + splits (owner/admin/budget manager may mutate)
 			budgetH := budget.NewHandler(d.Budget)
 			r.Get("/trips/{tripSlug}/expenses", budgetH.List)
 			r.Post("/trips/{tripSlug}/expenses", budgetH.Create)

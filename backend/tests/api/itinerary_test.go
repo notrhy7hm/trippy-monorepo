@@ -207,6 +207,48 @@ func TestItineraryNonMemberAccess(t *testing.T) {
 	}
 }
 
+// TestItineraryRoleMutationAccess
+//
+// Plain members can read itinerary items but cannot create, update, or delete
+// them. The planner role can mutate itinerary data.
+func TestItineraryRoleMutationAccess(t *testing.T) {
+	cleanDB(t)
+	alice := registerUser(t, "alice")
+	bob := registerUser(t, "bob")
+	pat := registerUser(t, "pat")
+	friendsBecome(t, alice, bob)
+	friendsBecome(t, alice, pat)
+	trip := createTrip(t, alice, "Italy")
+	inviteAndJoin(t, alice, bob, trip.Slug)
+	inviteAndJoinAs(t, alice, pat, trip.Slug, "planner")
+
+	item := createItinerary(t, alice, trip.Slug, map[string]any{"title": "Arrive"})
+
+	if all := listItinerary(t, bob, trip.Slug); len(all) != 1 {
+		t.Fatalf("member list size: got %d want 1", len(all))
+	}
+	if code, body := doRequest(t, "POST", "/api/v1/trips/"+trip.Slug+"/itinerary", bob.Token,
+		map[string]any{"title": "member edit"}); code != 403 {
+		t.Fatalf("member create: status %d (want 403): %s", code, body)
+	}
+	if code, body := doRequest(t, "PATCH", "/api/v1/trips/"+trip.Slug+"/itinerary/"+item.ID, bob.Token,
+		map[string]any{"title": "tampered"}); code != 403 {
+		t.Fatalf("member update: status %d (want 403): %s", code, body)
+	}
+	if code, body := doRequest(t, "DELETE", "/api/v1/trips/"+trip.Slug+"/itinerary/"+item.ID, bob.Token, nil); code != 403 {
+		t.Fatalf("member delete: status %d (want 403): %s", code, body)
+	}
+
+	planned := createItinerary(t, pat, trip.Slug, map[string]any{"title": "Planner item"})
+	var updated itineraryResponse
+	mustDo(t, "PATCH", "/api/v1/trips/"+trip.Slug+"/itinerary/"+planned.ID, pat.Token,
+		map[string]any{"title": "Updated planner item"}, 200, &updated)
+	if updated.Title != "Updated planner item" {
+		t.Fatalf("planner update title: got %q", updated.Title)
+	}
+	mustDo(t, "DELETE", "/api/v1/trips/"+trip.Slug+"/itinerary/"+planned.ID, pat.Token, nil, 204, nil)
+}
+
 // TestItineraryTripDateRangeValidation
 //
 // Backend enforces date/day vs trip range (added in the M2

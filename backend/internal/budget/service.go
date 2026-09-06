@@ -29,6 +29,8 @@ type TripAccess interface {
 	// AssertMember returns the trip's UUID if userID belongs to the trip
 	// addressed by slug, else trips.ErrNotFound / trips.ErrForbidden.
 	AssertMember(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, error)
+	// AssertMemberRole returns the caller's trip role alongside the trip id.
+	AssertMemberRole(ctx context.Context, slug string, userID uuid.UUID) (uuid.UUID, trips.Role, error)
 	// ListMembers returns the trip's members (the caller must be able to
 	// see the trip). budget uses it both to validate payer / split users
 	// and to label rows in the budget summary.
@@ -54,10 +56,10 @@ func (s *Service) ListExpenses(ctx context.Context, callerID uuid.UUID, slug str
 	return s.repo.ListExpenses(ctx, tripID)
 }
 
-// CreateExpense validates and inserts a new expense with its splits. Any
-// trip member may create expenses in M3.
+// CreateExpense validates and inserts a new expense with its splits. Budget
+// managers only.
 func (s *Service) CreateExpense(ctx context.Context, callerID uuid.UUID, slug string, in CreateInput) (Expense, error) {
-	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
+	tripID, err := s.assertBudgetManager(ctx, slug, callerID)
 	if err != nil {
 		return Expense{}, err
 	}
@@ -117,7 +119,7 @@ func (s *Service) CreateExpense(ctx context.Context, callerID uuid.UUID, slug st
 // transaction (it can depend on the stored amount). Omitted splits are
 // kept; provided splits replace the existing set wholesale.
 func (s *Service) UpdateExpense(ctx context.Context, callerID uuid.UUID, slug string, expenseID uuid.UUID, in UpdateInput) (Expense, error) {
-	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
+	tripID, err := s.assertBudgetManager(ctx, slug, callerID)
 	if err != nil {
 		return Expense{}, err
 	}
@@ -193,14 +195,25 @@ func (s *Service) UpdateExpense(ctx context.Context, callerID uuid.UUID, slug st
 	return s.repo.UpdateExpense(ctx, tripID, expenseID, row)
 }
 
-// DeleteExpense hard-deletes an expense (its splits cascade). Any trip
-// member may delete expenses in M3.
+// DeleteExpense hard-deletes an expense (its splits cascade). Budget managers
+// only.
 func (s *Service) DeleteExpense(ctx context.Context, callerID uuid.UUID, slug string, expenseID uuid.UUID) error {
-	tripID, err := s.trips.AssertMember(ctx, slug, callerID)
+	tripID, err := s.assertBudgetManager(ctx, slug, callerID)
 	if err != nil {
 		return err
 	}
 	return s.repo.DeleteExpense(ctx, tripID, expenseID)
+}
+
+func (s *Service) assertBudgetManager(ctx context.Context, slug string, callerID uuid.UUID) (uuid.UUID, error) {
+	tripID, role, err := s.trips.AssertMemberRole(ctx, slug, callerID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if !trips.CanManageBudget(role) {
+		return uuid.Nil, trips.ErrForbidden
+	}
+	return tripID, nil
 }
 
 // Summary computes the budget summary for a trip: per-member paid / owed /

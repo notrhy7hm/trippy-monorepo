@@ -45,14 +45,34 @@ export async function api<T = unknown>(
     window.dispatchEvent(new Event("trippy:unauthenticated"));
   }
 
-  const text = await res.text();
-  const parsed = text ? JSON.parse(text) : null;
+  const parsed = await parseResponse(res);
 
   if (!res.ok) {
-    const msg = (parsed && parsed.error) || res.statusText;
-    throw new ApiError(msg, res.status, parsed?.code);
+    const msg =
+      parsed && typeof parsed === "object" && "error" in parsed
+        ? String(parsed.error)
+        : res.statusText || "Request failed";
+    const code =
+      parsed && typeof parsed === "object" && "code" in parsed
+        ? String(parsed.code)
+        : undefined;
+    throw new ApiError(msg, res.status, code);
   }
   return parsed as T;
+}
+
+async function parseResponse(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return null;
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    return text;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 function apiBase(raw: string | undefined) {

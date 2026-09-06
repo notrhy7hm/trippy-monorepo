@@ -11,8 +11,8 @@ export function Landing() {
         Plan trips that actually happen.
       </h1>
       <p className="mt-6 max-w-xl text-base text-ink-600">
-        A quiet, premium workspace for groups of friends — tasks, timeline,
-        budget, and a trip-scoped AI assistant that proposes, never decides.
+        A quiet, premium workspace for groups of friends — tasks, itinerary,
+        and budget in one shared place.
       </p>
       <div className="mt-10 flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center">
         <Link to="/register">

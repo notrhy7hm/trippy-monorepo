@@ -103,14 +103,16 @@ func redactDSN(dsn string) string {
 	return u.String()
 }
 
-// verifySchema does a trivial SELECT on the most recently added M2
-// table. ErrNoRows means the table exists and is empty (fine); any
-// other error means the schema isn't up to date.
+// verifySchema does trivial SELECTs on the latest M3 tables. ErrNoRows means a
+// table exists and is empty (fine); any other error means the schema isn't up
+// to date.
 func verifySchema(d *sqlx.DB) error {
-	var n int
-	err := d.Get(&n, "SELECT 1 FROM trip_itinerary_items LIMIT 1")
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+	for _, table := range []string{"trip_expenses", "trip_expense_splits"} {
+		var n int
+		err := d.Get(&n, "SELECT 1 FROM "+table+" LIMIT 1")
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%s: %w", table, err)
+		}
 	}
 	return nil
 }

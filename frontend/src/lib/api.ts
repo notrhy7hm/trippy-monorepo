@@ -21,6 +21,8 @@ export class ApiError extends Error {
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 
+const API_BASE = apiBase(import.meta.env.VITE_API_BASE);
+
 export async function api<T = unknown>(
   method: Method,
   path: string,
@@ -32,7 +34,7 @@ export async function api<T = unknown>(
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`/api/v1${path}`, {
+  const res = await fetch(`${API_BASE}${normalizePath(path)}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -51,4 +53,14 @@ export async function api<T = unknown>(
     throw new ApiError(msg, res.status, parsed?.code);
   }
   return parsed as T;
+}
+
+function apiBase(raw: string | undefined) {
+  const base = raw?.trim().replace(/\/+$/, "");
+  if (!base) return "/api/v1";
+  return base.endsWith("/api/v1") ? base : `${base}/api/v1`;
+}
+
+function normalizePath(path: string) {
+  return path.startsWith("/") ? path : `/${path}`;
 }

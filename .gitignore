@@ -3,6 +3,7 @@ backend/bin/
 backend/*.exe
 backend/coverage.out
 backend/.env
+.env
 
 # Node / Vite
 frontend/node_modules/

@@ -423,7 +423,7 @@ func TestBudgetSummaryBalancesAndSettlements(t *testing.T) {
 	bob := registerUser(t, "bob")
 	friendsBecome(t, alice, bob)
 	trip := createTrip(t, alice, "Italy")
-	inviteAndJoin(t, alice, bob, trip.Slug)
+	inviteAndJoinAs(t, alice, bob, trip.Slug, "budget_manager")
 
 	// Hotel 600.00 paid by alice, split 300/300.
 	createExpense(t, alice, trip.Slug, map[string]any{

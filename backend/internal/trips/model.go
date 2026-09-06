@@ -95,7 +95,7 @@ type Trip struct {
 }
 
 type Member struct {
-	UserID      uuid.UUID `db:"user_id" json:"-"`
+	UserID      uuid.UUID `db:"user_id" json:"userId"`
 	Username    string    `db:"username" json:"username"`
 	DisplayName string    `db:"display_name" json:"displayName"`
 	Role        Role      `db:"role" json:"role"`

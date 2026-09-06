@@ -2,6 +2,14 @@ package api
 
 import "testing"
 
+type memberResponse struct {
+	UserID      string   `json:"userId"`
+	Username    string   `json:"username"`
+	DisplayName string   `json:"displayName"`
+	Role        string   `json:"role"`
+	Tags        []string `json:"tags"`
+}
+
 func TestPublicTripReadEndpoint(t *testing.T) {
 	cleanDB(t)
 	alice := registerUser(t, "alice")
@@ -16,6 +24,21 @@ func TestPublicTripReadEndpoint(t *testing.T) {
 
 	if code, body := doRequest(t, "GET", "/api/v1/public/trips/"+privateTrip.Slug, "", nil); code != 404 {
 		t.Fatalf("private public-read: status %d (want 404): %s", code, body)
+	}
+}
+
+func TestTripMembersExposeUserIDs(t *testing.T) {
+	cleanDB(t)
+	alice := registerUser(t, "alice")
+	trip := createTrip(t, alice, "Italy")
+
+	var members []memberResponse
+	mustDo(t, "GET", "/api/v1/trips/"+trip.Slug+"/members", alice.Token, nil, 200, &members)
+	if len(members) != 1 {
+		t.Fatalf("members: got %d want 1", len(members))
+	}
+	if members[0].UserID != alice.ID.String() {
+		t.Fatalf("member userId: got %q want %q", members[0].UserID, alice.ID)
 	}
 }
 

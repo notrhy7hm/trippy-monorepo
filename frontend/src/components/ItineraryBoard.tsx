@@ -63,6 +63,7 @@ export function ItineraryBoard({
   reloadTrip,
   tripStartsOn,
   tripEndsOn,
+  onItemsChange,
 }: {
   tripSlug: string | undefined;
   // Members is currently unused by this section (no assignee), but kept
@@ -78,6 +79,7 @@ export function ItineraryBoard({
   // enforces the trip range.
   tripStartsOn?: string;
   tripEndsOn?: string;
+  onItemsChange?: (items: ItineraryItem[] | null) => void;
 }) {
   const confirm = useConfirmation();
   const tripStartDate = tripStartsOn
@@ -88,6 +90,9 @@ export function ItineraryBoard({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [accessLost, setAccessLost] = useState(false);
+  useEffect(() => {
+    onItemsChange?.(viewerIsMember && !accessLost ? items : null);
+  }, [items, viewerIsMember, accessLost, onItemsChange]);
 
   const [showForm, setShowForm] = useState(false);
   const [createForm, setCreateForm] = useState<FormState>(emptyForm);

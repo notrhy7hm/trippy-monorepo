@@ -77,6 +77,7 @@ export function PlanningBoard({
   viewerIsMember,
   canManage,
   reloadTrip,
+  onTasksChange,
 }: {
   tripSlug: string | undefined;
   members: BoardMember[];
@@ -86,6 +87,7 @@ export function PlanningBoard({
   // it when a task action returns 403/404 so viewerIsMember can re-derive
   // from the server's view of membership.
   reloadTrip: () => Promise<void>;
+  onTasksChange?: (tasks: Task[] | null) => void;
 }) {
   const confirm = useConfirmation();
   const [tasks, setTasks] = useState<Task[] | null>(null);
@@ -107,6 +109,9 @@ export function PlanningBoard({
   // PATCH/DELETE is in flight, so a second click cannot race the first.
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  useEffect(() => {
+    onTasksChange?.(viewerIsMember && !accessLost ? tasks : null);
+  }, [tasks, viewerIsMember, accessLost, onTasksChange]);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),

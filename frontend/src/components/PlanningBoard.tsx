@@ -7,6 +7,7 @@ import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { api, ApiError } from "../lib/api";
+import { useConfirmation } from "./ui/ConfirmationDialog";
 
 type Status = "todo" | "in_progress" | "done";
 type Priority = "low" | "normal" | "high";
@@ -86,6 +87,7 @@ export function PlanningBoard({
   // from the server's view of membership.
   reloadTrip: () => Promise<void>;
 }) {
+  const confirm = useConfirmation();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -298,9 +300,9 @@ export function PlanningBoard({
   }
 
   async function onDelete(task: Task) {
-    if (busyTaskId !== null || !tripSlug || !canManage) return;
-    if (!window.confirm(`Delete "${task.title}"?`)) return;
+    if (busyTaskId !== null || accessLost || !tripSlug || !canManage) return;
     const gen = genRef.current;
+    if (!await confirm({ title: "Delete task?", description: `"${task.title}" will be permanently deleted.` }) || gen !== genRef.current) return;
     setBusyTaskId(task.id);
     setActionError(null);
     try {

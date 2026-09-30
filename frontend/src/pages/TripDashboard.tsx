@@ -15,6 +15,7 @@ import { ItineraryBoard } from "../components/ItineraryBoard";
 import { BudgetBoard } from "../components/BudgetBoard";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useConfirmation } from "../components/ui/ConfirmationDialog";
 
 type Role =
   | "owner"
@@ -89,6 +90,7 @@ type TagsEditingProps = {
 };
 
 export function TripDashboard() {
+  const confirm = useConfirmation();
   const { tripSlug } = useParams<{ tripSlug: string }>();
   const { user } = useAuth();
 
@@ -257,6 +259,8 @@ export function TripDashboard() {
 
   async function onRevoke(token: string) {
     if (!tripSlug) return;
+    const gen = genRef.current;
+    if (!await confirm({ title: "Revoke invitation?", description: "This invitation will no longer be available to accept.", confirmLabel: "Revoke" }) || gen !== genRef.current) return;
     setBusyToken(token);
     setInviteError(null);
     try {

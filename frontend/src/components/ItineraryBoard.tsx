@@ -10,6 +10,7 @@ import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { api, ApiError } from "../lib/api";
+import { useConfirmation } from "./ui/ConfirmationDialog";
 
 type Party = { username: string; displayName: string };
 
@@ -78,6 +79,7 @@ export function ItineraryBoard({
   tripStartsOn?: string;
   tripEndsOn?: string;
 }) {
+  const confirm = useConfirmation();
   const tripStartDate = tripStartsOn
     ? formatDateDisplay(tripStartsOn)
     : undefined;
@@ -318,8 +320,8 @@ export function ItineraryBoard({
   // ---- delete -----------------------------------------------------------
   async function onDelete(item: ItineraryItem) {
     if (busyItemId !== null || accessLost || !tripSlug || !canManage) return;
-    if (!window.confirm(`Delete "${item.title}"?`)) return;
     const gen = genRef.current;
+    if (!await confirm({ title: "Delete itinerary item?", description: `"${item.title}" will be permanently deleted.` }) || gen !== genRef.current) return;
     setBusyItemId(item.id);
     setActionError(null);
     try {

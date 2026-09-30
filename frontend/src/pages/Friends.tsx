@@ -4,6 +4,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 import { api, ApiError } from "../lib/api";
+import { useConfirmation } from "../components/ui/ConfirmationDialog";
 
 type Friend = {
   username: string;
@@ -33,6 +34,7 @@ type SearchResult = {
 };
 
 export function Friends() {
+  const confirm = useConfirmation();
   const [friends, setFriends] = useState<Friend[] | null>(null);
   const [incoming, setIncoming] = useState<Request[] | null>(null);
   const [outgoing, setOutgoing] = useState<Request[] | null>(null);
@@ -149,6 +151,7 @@ export function Friends() {
   }
 
   async function cancelRequest(username: string) {
+    if (!await confirm({ title: "Cancel friend request?", description: `Cancel your request to @${username}?`, confirmLabel: "Cancel request" })) return;
     await withBusy(username, async () => {
       await api("DELETE", `/friend-requests/to/${encodeURIComponent(username)}`);
       patchResultRelation(username, "none");
@@ -157,7 +160,7 @@ export function Friends() {
   }
 
   async function removeFriend(username: string) {
-    if (!window.confirm(`Remove @${username} from your friends?`)) return;
+    if (!await confirm({ title: "Remove friend?", description: `@${username} will be removed from your friends.`, confirmLabel: "Remove" })) return;
     await withBusy(username, async () => {
       await api("DELETE", `/friends/${encodeURIComponent(username)}`);
       patchResultRelation(username, "none");

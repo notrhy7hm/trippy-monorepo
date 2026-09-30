@@ -4,6 +4,7 @@ import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { api, ApiError } from "../lib/api";
+import { useConfirmation } from "./ui/ConfirmationDialog";
 
 export type BudgetMember = {
   userId: string;
@@ -80,6 +81,7 @@ export function BudgetBoard({
   currentUserId?: string;
   reloadTrip: () => Promise<void>;
 }) {
+  const confirm = useConfirmation();
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -188,7 +190,7 @@ export function BudgetBoard({
 
   async function onDelete(expense: Expense) {
     if (!tripSlug || busy || !canManage) return;
-    if (!window.confirm(`Delete "${expense.title}"?`)) return;
+    if (!await confirm({ title: "Delete expense?", description: `"${expense.title}" and its splits will be permanently deleted.` })) return;
     setBusy(true);
     setActionError(null);
     try {

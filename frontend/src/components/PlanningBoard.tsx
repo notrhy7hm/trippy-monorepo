@@ -1,15 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, FormEvent } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
+import { DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, pointerWithin, rectIntersection, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
+import type { DragEndEvent, KeyboardCoordinateGetter } from "@dnd-kit/core";
+import { Plus, Trash2 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Input } from "./ui/Input";
 import { api, ApiError } from "../lib/api";
+import { useConfirmation } from "./ui/ConfirmationDialog";
 
 type Status = "todo" | "in_progress" | "done";
 type Priority = "low" | "normal" | "high";
 
 const STATUSES: Status[] = ["todo", "in_progress", "done"];
 const PRIORITIES: Priority[] = ["low", "normal", "high"];
+
+const columnKeyboardCoordinates: KeyboardCoordinateGetter = (event, { currentCoordinates, context }) => {
+  const direction = ["ArrowRight", "ArrowDown"].includes(event.code) ? 1 : ["ArrowLeft", "ArrowUp"].includes(event.code) ? -1 : 0;
+  if (!direction) return;
+  event.preventDefault();
+  const width = context.collisionRect?.width ?? 0;
+  const height = context.collisionRect?.height ?? 0;
+  const center = { x: currentCoordinates.x + width / 2, y: currentCoordinates.y + height / 2 };
+  const index = STATUSES.findIndex((status) => {
+    const rect = context.droppableRects.get(status);
+    return rect && center.x >= rect.left && center.x <= rect.right && center.y >= rect.top && center.y <= rect.bottom;
+  });
+  const rect = context.droppableRects.get(STATUSES[index + direction]);
+  return rect ? { x: rect.left + (rect.width - width) / 2, y: rect.top + (rect.height - height) / 2 } : undefined;
+};
 
 type Party = { username: string; displayName: string };
 
@@ -35,6 +54,7 @@ export type BoardMember = {
 };
 
 type FormState = {
+  status: Status;
   title: string;
   description: string;
   priority: Priority;
@@ -43,6 +63,7 @@ type FormState = {
 };
 
 const emptyForm: FormState = {
+  status: "todo",
   title: "",
   description: "",
   priority: "normal",
@@ -56,6 +77,7 @@ export function PlanningBoard({
   viewerIsMember,
   canManage,
   reloadTrip,
+  onTasksChange,
 }: {
   tripSlug: string | undefined;
   members: BoardMember[];
@@ -65,7 +87,9 @@ export function PlanningBoard({
   // it when a task action returns 403/404 so viewerIsMember can re-derive
   // from the server's view of membership.
   reloadTrip: () => Promise<void>;
+  onTasksChange?: (tasks: Task[] | null) => void;
 }) {
+  const confirm = useConfirmation();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -84,6 +108,15 @@ export function PlanningBoard({
   // busyTaskId locks status/delete buttons across every row while any task
   // PATCH/DELETE is in flight, so a second click cannot race the first.
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
+  useEffect(() => {
+    onTasksChange?.(viewerIsMember && !accessLost ? tasks : null);
+  }, [tasks, viewerIsMember, accessLost, onTasksChange]);
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: columnKeyboardCoordinates }),
+  );
 
   // genRef ticks on every tripSlug change. Async resolves capture
   // genRef.current before awaiting and bail out if the slug has changed —
@@ -123,6 +156,7 @@ export function PlanningBoard({
     setFormError(null);
     setCreating(false);
     setBusyTaskId(null);
+    setActiveTask(null);
     if (viewerIsMember && tripSlug) refresh();
   }, [tripSlug, viewerIsMember, refresh]);
 
@@ -164,6 +198,7 @@ export function PlanningBoard({
     try {
       const body: Record<string, unknown> = {
         title,
+        status: form.status,
         description: form.description.trim(),
         priority: form.priority,
       };
@@ -221,10 +256,12 @@ export function PlanningBoard({
   );
 
   async function onChangeStatus(task: Task, next: Status) {
-    if (busyTaskId !== null || next === task.status || !tripSlug || !canManage) return;
+    if (busyTaskId !== null || accessLost || next === task.status || !tripSlug || !canManage) return;
     const gen = genRef.current;
     setBusyTaskId(task.id);
     setActionError(null);
+    const position = Math.max(-1, ...(tasks ?? []).filter((t) => t.status === next).map((t) => t.position)) + 1;
+    setTasks((prev) => prev?.map((t) => t.id === task.id ? { ...t, status: next, position } : t) ?? prev);
     try {
       const updated = await api<Task>(
         "PATCH",
@@ -237,6 +274,7 @@ export function PlanningBoard({
       );
     } catch (err) {
       if (gen !== genRef.current) return;
+      setTasks((prev) => prev?.map((t) => t.id === task.id ? task : t) ?? prev);
       if (
         err instanceof ApiError &&
         (err.status === 403 || err.status === 404)
@@ -252,10 +290,24 @@ export function PlanningBoard({
     }
   }
 
+  function openCreate(status: Status) {
+    setForm((prev) => showForm ? { ...prev, status } : { ...emptyForm, status });
+    setFormError(null);
+    setShowForm(true);
+  }
+
+  function onDragEnd({ active, over }: DragEndEvent) {
+    setActiveTask(null);
+    const task = tasks?.find((t) => t.id === active.id);
+    if (task && over && STATUSES.includes(over.id as Status)) {
+      void onChangeStatus(task, over.id as Status);
+    }
+  }
+
   async function onDelete(task: Task) {
-    if (busyTaskId !== null || !tripSlug || !canManage) return;
-    if (!window.confirm(`Delete "${task.title}"?`)) return;
+    if (busyTaskId !== null || accessLost || !tripSlug || !canManage) return;
     const gen = genRef.current;
+    if (!await confirm({ title: "Delete task?", description: `"${task.title}" will be permanently deleted.` }) || gen !== genRef.current) return;
     setBusyTaskId(task.id);
     setActionError(null);
     try {
@@ -296,8 +348,8 @@ export function PlanningBoard({
           <Button
             variant={showForm ? "ghost" : "primary"}
             onClick={() => {
-              setShowForm((v) => !v);
-              setFormError(null);
+              if (showForm) setShowForm(false);
+              else openCreate("todo");
             }}
             className="w-full sm:w-auto"
           >
@@ -359,16 +411,29 @@ export function PlanningBoard({
           )}
 
           {tasks && (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={(args) => {
+                const collisions = pointerWithin(args);
+                return args.pointerCoordinates ? collisions : rectIntersection(args);
+              }}
+              onDragStart={({ active }) => setActiveTask(tasks.find((t) => t.id === active.id) ?? null)}
+              onDragEnd={onDragEnd}
+              onDragCancel={() => setActiveTask(null)}
+            >
             <div className="mt-4 grid gap-4 lg:grid-cols-3">
               {STATUSES.map((status) => (
-                <Card key={status} className="p-4">
+                <TaskColumn key={status} status={status} disabled={!canManage || busyTaskId !== null}>
                   <div className="flex items-baseline justify-between gap-3">
                     <h3 className="text-sm font-medium">
                       {prettyStatus(status)}
                     </h3>
-                    <span className="text-[10px] uppercase tracking-wider text-ink-400">
+                    <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-ink-400">
                       {byStatus[status].length}
                     </span>
+                    {canManage && <button type="button" onClick={() => openCreate(status)} aria-label={`Add task to ${prettyStatus(status)}`} title={`Add task to ${prettyStatus(status)}`} className="flex h-7 w-7 items-center justify-center rounded hover:bg-ink-100"><Plus size={16} /></button>}
+                    </div>
                   </div>
                   <div className="mt-3 space-y-3">
                     {byStatus[status].length === 0 ? (
@@ -388,9 +453,13 @@ export function PlanningBoard({
                       ))
                     )}
                   </div>
-                </Card>
+                </TaskColumn>
               ))}
             </div>
+            <DragOverlay dropAnimation={{ duration: 180, easing: "ease-out" }}>
+              {activeTask && <article aria-hidden="true" className="pointer-events-none rounded-md border border-ink-200 bg-white p-3 shadow-lg"><TaskContent task={activeTask} locked canManage={canManage} onChangeStatus={() => {}} onDelete={() => {}} /></article>}
+            </DragOverlay>
+            </DndContext>
           )}
         </>
       )}
@@ -419,6 +488,12 @@ function CreateForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      <div>
+        <label htmlFor="task-status" className="text-xs font-medium text-ink-600">Status</label>
+        <select id="task-status" value={form.status} disabled={busy} onChange={(e) => setField("status", e.target.value as Status)} className="mt-1 w-full rounded-md border border-ink-200 bg-white px-3 py-2 text-sm">
+          {STATUSES.map((status) => <option key={status} value={status}>{prettyStatus(status)}</option>)}
+        </select>
+      </div>
       <div>
         <label className="text-xs font-medium text-ink-600">Title</label>
         <Input
@@ -512,21 +587,37 @@ function CreateForm({
   );
 }
 
-function TaskCard({
-  task,
-  locked,
-  canManage,
-  onChangeStatus,
-  onDelete,
-}: {
+type TaskCardProps = {
   task: Task;
   locked: boolean;
   canManage: boolean;
   onChangeStatus: (task: Task, next: Status) => void;
   onDelete: (task: Task) => void;
-}) {
+};
+
+function TaskColumn({ status, disabled, children }: { status: Status; disabled: boolean; children: ReactNode }) {
+  const { setNodeRef } = useDroppable({ id: status, disabled });
+  return <section ref={setNodeRef} aria-label={prettyStatus(status)} data-task-column={status} className="min-h-36 bg-ink-50/70 p-3 sm:p-4">{children}</section>;
+}
+
+function TaskCard(props: TaskCardProps) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: props.task.id, disabled: !props.canManage || props.locked });
   return (
-    <article className="rounded-md border border-ink-200 bg-white p-3">
+    <article ref={setNodeRef} {...(props.canManage && !props.locked ? { ...attributes, ...listeners } : {})} aria-label={props.task.title} data-task-id={props.task.id} className={`rounded-md border border-ink-200 bg-white p-3 transition-opacity ${isDragging ? "opacity-30" : "opacity-100"} ${props.canManage && !props.locked ? "cursor-grab active:cursor-grabbing" : ""}`}>
+      <TaskContent {...props} />
+    </article>
+  );
+}
+
+function TaskContent({
+  task,
+  locked,
+  canManage,
+  onChangeStatus,
+  onDelete,
+}: TaskCardProps) {
+  return (
+    <>
       <div className="flex items-start justify-between gap-2">
         <p className="min-w-0 break-words text-sm font-medium leading-snug">
           {task.title}
@@ -550,7 +641,7 @@ function TaskCard({
         </span>
       </div>
       {canManage && (
-      <div className="mt-3 flex flex-wrap items-center gap-1 border-t border-ink-100 pt-3">
+      <div onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="mt-3 flex flex-wrap items-center gap-1 border-t border-ink-100 pt-3">
         {STATUSES.map((s) => {
           const selected = task.status === s;
           return (
@@ -576,13 +667,15 @@ function TaskCard({
           type="button"
           onClick={() => onDelete(task)}
           disabled={locked}
-          className="ml-auto px-2 py-1 text-[10px] uppercase tracking-wider text-ink-400 hover:text-red-600 disabled:opacity-50 disabled:hover:text-ink-400"
+          aria-label={`Delete ${task.title}`}
+          title="Delete task"
+          className="ml-auto flex h-7 w-7 items-center justify-center rounded text-ink-400 hover:text-red-600 disabled:opacity-50"
         >
-          Delete
+          <Trash2 size={14} />
         </button>
       </div>
       )}
-    </article>
+    </>
   );
 }
 

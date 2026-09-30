@@ -13,8 +13,11 @@ import { Input } from "../components/ui/Input";
 import { PlanningBoard } from "../components/PlanningBoard";
 import { ItineraryBoard } from "../components/ItineraryBoard";
 import { BudgetBoard } from "../components/BudgetBoard";
+import { TripTimeline } from "../components/TripTimeline";
+import type { TimelineItem, TimelineTask } from "../lib/timeline";
 import { api, ApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useConfirmation } from "../components/ui/ConfirmationDialog";
 
 type Role =
   | "owner"
@@ -89,11 +92,14 @@ type TagsEditingProps = {
 };
 
 export function TripDashboard() {
+  const confirm = useConfirmation();
   const { tripSlug } = useParams<{ tripSlug: string }>();
   const { user } = useAuth();
 
   const [trip, setTrip] = useState<Trip | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [timelineTasks, setTimelineTasks] = useState<TimelineTask[] | null>(null);
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [friends, setFriends] = useState<Friend[] | null>(null);
@@ -151,6 +157,8 @@ export function TripDashboard() {
     setError(null);
     setTrip(null);
     setMembers([]);
+    setTimelineTasks(null);
+    setTimelineItems(null);
     setFriends(null);
     setInvites(null);
     setInviteError(null);
@@ -257,6 +265,8 @@ export function TripDashboard() {
 
   async function onRevoke(token: string) {
     if (!tripSlug) return;
+    const gen = genRef.current;
+    if (!await confirm({ title: "Revoke invitation?", description: "This invitation will no longer be available to accept.", confirmLabel: "Revoke" }) || gen !== genRef.current) return;
     setBusyToken(token);
     setInviteError(null);
     try {
@@ -492,12 +502,22 @@ export function TripDashboard() {
         <span className="break-all font-mono">{trip.slug}</span>
       </p>
 
+      <TripTimeline
+        key={tripSlug}
+        tasks={timelineTasks}
+        items={timelineItems}
+        startsOn={trip.startsOn}
+        endsOn={trip.endsOn}
+        viewerIsMember={!!myMember}
+      />
+
       <PlanningBoard
         tripSlug={tripSlug}
         members={members}
         viewerIsMember={!!myMember}
         canManage={canManagePlanning}
         reloadTrip={reloadTrip}
+        onTasksChange={setTimelineTasks}
       />
 
       <ItineraryBoard
@@ -508,6 +528,7 @@ export function TripDashboard() {
         reloadTrip={reloadTrip}
         tripStartsOn={trip.startsOn}
         tripEndsOn={trip.endsOn}
+        onItemsChange={setTimelineItems}
       />
 
       <BudgetBoard
@@ -518,10 +539,6 @@ export function TripDashboard() {
         currentUserId={myMember?.userId}
         reloadTrip={reloadTrip}
       />
-
-      <div className="mt-8 grid gap-4 sm:mt-10 md:grid-cols-2">
-        <PlannerCard title="Timeline" hint="Branching timeline · later" />
-      </div>
 
       {canInvite ? (
         <div className="mt-10 grid gap-6 md:grid-cols-3">
@@ -1000,16 +1017,6 @@ function TagEditor({
         </button>
       </div>
     </div>
-  );
-}
-
-function PlannerCard({ title, hint }: { title: string; hint: string }) {
-  return (
-    <Card className="p-4 opacity-70 sm:p-6">
-      <p className="text-xs uppercase tracking-[0.18em] text-ink-500">Soon</p>
-      <h3 className="mt-2 text-lg font-medium">{title}</h3>
-      <p className="mt-2 text-sm text-ink-500">{hint}</p>
-    </Card>
   );
 }
 
